@@ -61,6 +61,16 @@ def verify_admin_pin_with_lockout(
         else None
     )
     now = time.monotonic()
+    # Prune stale keys from in-memory _pin_failures map to prevent unbounded growth
+    if len(_pin_failures) > 500:
+        stale_keys = [
+            ip
+            for ip, ts_list in _pin_failures.items()
+            if not ts_list or (now - ts_list[-1]) >= settings.PIN_LOCKOUT_SECONDS
+        ]
+        for ip in stale_keys:
+            _pin_failures.pop(ip, None)
+
     recent_fails = [
         t for t in _pin_failures[client_ip] if (now - t) < settings.PIN_LOCKOUT_SECONDS
     ]
@@ -101,12 +111,13 @@ def verify_admin_pin_with_lockout(
 
 
 SESSION_COOKIE = "aim_admin"
-SESSION_MAX_AGE = 12 * 3600
+SESSION_MAX_AGE = settings.SESSION_MAX_AGE_SECONDS
 
 
 def _session_sig(ts: str) -> str:
+    secret_key = (settings.SESSION_SECRET or settings.ADMIN_PIN).encode()
     return hmac.new(
-        settings.ADMIN_PIN.encode(), f"dashboard:{ts}".encode(), hashlib.sha256
+        secret_key, f"dashboard:{ts}".encode(), hashlib.sha256
     ).hexdigest()
 
 

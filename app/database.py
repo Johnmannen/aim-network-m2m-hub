@@ -594,7 +594,10 @@ def log_traffic_event(
         category = "OTHER"
 
     agent_label = classify_user_agent(user_agent)
-    now_iso = datetime.now(timezone.utc).isoformat()
+    now_dt = datetime.now(timezone.utc)
+    now_iso = now_dt.isoformat()
+    retention_days = int(getattr(settings, "TRAFFIC_RETENTION_DAYS", 30))
+    cutoff_iso = (now_dt - timedelta(days=retention_days)).isoformat()
 
     with get_connection(db_path) as conn:
         conn.execute(
@@ -618,10 +621,11 @@ def log_traffic_event(
         conn.execute(
             """
             DELETE FROM traffic_logs
-            WHERE id NOT IN (
+            WHERE created_at < ? OR id NOT IN (
                 SELECT id FROM traffic_logs ORDER BY id DESC LIMIT 5000
             );
-            """
+            """,
+            (cutoff_iso,),
         )
         conn.commit()
 

@@ -12,9 +12,10 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
-# Ephemeral fallback tokens generated per process if not set in env (distinct for Admin vs Scout)
+# Ephemeral fallback tokens generated per process if not set in env (distinct for Admin, Scout, and Session)
 _GENERATED_FALLBACK_PIN = secrets.token_urlsafe(24)
 _GENERATED_FALLBACK_SCOUT = secrets.token_urlsafe(24)
+_GENERATED_FALLBACK_SESSION = secrets.token_urlsafe(32)
 
 
 class Settings:
@@ -31,11 +32,16 @@ class Settings:
         "WALLET_ADDRESS", "0x1bbae07abebbb61f611391e02e81ee26b0c47b79"
     )
 
-    # Admin security token/PIN & separate Scout/Backup token (never hardcoded in repo)
+    # Admin security token/PIN, separate Scout/Backup token, and Session signing secret
     ADMIN_PIN: str = os.getenv("ADMIN_PIN", "") or _GENERATED_FALLBACK_PIN
     SCOUT_SECRET_TOKEN: str = (
         os.getenv("SCOUT_SECRET_TOKEN", "") or _GENERATED_FALLBACK_SCOUT
     )
+    SESSION_SECRET: str = os.getenv("SESSION_SECRET", "") or _GENERATED_FALLBACK_SESSION
+    SESSION_MAX_AGE_SECONDS: int = int(
+        os.getenv("SESSION_MAX_AGE_SECONDS", str(4 * 3600))
+    )
+    TRAFFIC_RETENTION_DAYS: int = int(os.getenv("TRAFFIC_RETENTION_DAYS", "30"))
 
     # Production default is ALWAYS "strict_onchain".
     # Simulated `test_tx_` tokens are only accepted when TESTING=true AND X402_VERIFY_MODE=hybrid.

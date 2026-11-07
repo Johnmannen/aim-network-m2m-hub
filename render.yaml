@@ -12,6 +12,8 @@ services:
         generateValue: true
       - key: SCOUT_SECRET_TOKEN
         generateValue: true
+      - key: SESSION_SECRET
+        generateValue: true
       - key: X402_VERIFY_MODE
         value: "strict_onchain"
       - key: TESTING

@@ -384,6 +384,7 @@
             <button class="btn-scout" onclick="toggleVerifyMode()">🔐 Växla On-Chain/Hybrid</button>
             <button class="btn-scout" onclick="runScoutNow()">🔍 Kör Spanar-Agent Nu</button>
             <button class="btn-refresh" onclick="window.location.reload()">🔄 Uppdatera Siffror</button>
+            <button class="btn-refresh" style="background:#475569;" onclick="logoutAdmin()">🚪 Logga ut</button>
         </div>
         <div class="links-footer" style="margin-top: 16px;">
             <span>Maskin-kataloger för AI-botar:</span>
@@ -463,6 +464,11 @@
             box.textContent = "Kör själv-diagnos på alla 4 agenter...";
             const data = await adminFetch("/api/admin/self-check");
             box.textContent = "// SJÄLV-DIAGNOS RESULTAT:\n" + JSON.stringify(data, null, 2);
+        }
+
+        async function logoutAdmin() {
+            await fetch("/api/admin/logout", { method: "POST", credentials: "same-origin" });
+            window.location.reload();
         }
 
         // Auto-refresh Dashboard var 30:e sekund via fetch så sidan uppdateras mjukt utan att tappa scroll-position
