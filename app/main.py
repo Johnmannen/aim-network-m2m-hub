@@ -85,6 +85,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
         client_ip = _resolve_client_ip(request)
         country = request.headers.get("CF-IPCountry", "GLOBAL")
         user_agent = request.headers.get("User-Agent", "")
+        has_admin_cookie = bool(request.cookies.get("aim_admin"))
         db_override = getattr(request.app.state, "db_path", None)
 
         now = time.monotonic()
@@ -110,6 +111,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
                     user_agent=user_agent,
                     country=country,
                     latency_ms=elapsed_ms,
+                    has_admin_cookie=has_admin_cookie,
                     db_path=db_override,
                 )
             except Exception as exc:
@@ -134,6 +136,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 user_agent=user_agent,
                 country=country,
                 latency_ms=elapsed_ms,
+                has_admin_cookie=has_admin_cookie,
                 db_path=db_override,
             )
         except Exception as exc:

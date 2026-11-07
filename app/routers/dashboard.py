@@ -21,10 +21,11 @@ from app.utils import resolve_client_ip
 from app.database import (
     check_pin_lockout_db,
     clear_pin_failures_db,
+    clear_traffic_logs_db,
     export_db_snapshot,
     get_stats,
     import_db_snapshot,
-     log_traffic_event,
+    log_traffic_event,
     record_paid_call,
     record_pin_failure_db,
     reset_simulated_purchases,
@@ -439,6 +440,20 @@ async def reset_admin_simulations(
     db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
     updated_stats = reset_simulated_purchases(db_override)
     return {"status": "simulations_cleared", "stats": updated_stats}
+
+
+@router.post("/api/admin/clear-traffic", response_class=JSONResponse)
+async def clear_admin_traffic_logs(
+    request: Request,
+    x_admin_pin: Optional[str] = Header(default=None, alias="X-Admin-Pin"),
+) -> dict:
+    """Clear all traffic_logs so only fresh external bot visits are shown."""
+    if not has_valid_session(request):
+        verify_admin_pin_with_lockout(request, x_admin_pin)
+
+    db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
+    updated_stats = clear_traffic_logs_db(db_override)
+    return {"status": "traffic_cleared", "stats": updated_stats}
 
 
 @router.get("/", response_class=HTMLResponse)

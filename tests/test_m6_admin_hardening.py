@@ -173,3 +173,25 @@ def test_admin_simulate_and_reset_purchase(tmp_path):
     assert rst.json()["stats"]["calls_micro"] == 0
     assert rst.json()["stats"]["revenue_usdc"] == 0.0
     assert rst.json()["stats"]["traffic_telemetry"]["paid_200"] == 0
+
+
+def test_admin_cookie_requests_excluded_from_external_traffic_and_clear_traffic(tmp_path):
+    c = _client(tmp_path)
+    # 1. External bot request (no admin cookie) IS counted in external traffic
+    c.get("/llms.txt", headers={"User-Agent": "GPTBot/1.0"})
+    # 2. Internal diagnostic probe (aim-internal-probe) is NOT counted
+    c.get("/llms.txt", headers={"User-Agent": "aim-internal-probe"})
+
+    # 3. Log in as admin (sets aim_admin cookie)
+    c.post("/api/admin/login", json={"pin": settings.ADMIN_PIN})
+    # Admin clicking /llms.txt or /agents.json with aim_admin cookie is NOT counted as external traffic
+    c.get("/llms.txt")
+    c.get("/agents.json")
+
+    stats = c.get("/api/admin/stats").json()
+    assert stats["traffic_telemetry"]["total_external_requests"] == 1
+
+    # 4. Clear traffic logs via /api/admin/clear-traffic
+    clr = c.post("/api/admin/clear-traffic")
+    assert clr.status_code == 200
+    assert clr.json()["stats"]["traffic_telemetry"]["total_external_requests"] == 0

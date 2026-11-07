@@ -552,17 +552,21 @@ def log_traffic_event(
     user_agent: str = "",
     country: str = "GLOBAL",
     latency_ms: float = 0.0,
+    has_admin_cookie: bool = False,
     db_path: Optional[str] = None,
 ) -> None:
     """Record an HTTP request into traffic_logs with automatic funnel categorization."""
     init_db(db_path)
 
+    ua_lower = (user_agent or "").lower()
     is_internal = (
         1
         if (
             path in ("/", "/health", "/favicon.ico")
             or path.startswith("/api/admin")
-            or "aim-keepalive" in (user_agent or "").lower()
+            or "aim-keepalive" in ua_lower
+            or "aim-internal-probe" in ua_lower
+            or has_admin_cookie
         )
         else 0
     )
@@ -863,5 +867,14 @@ def reset_simulated_purchases(db_path: Optional[str] = None) -> Dict[str, Any]:
             """,
             (int(micro_cnt), int(prem_cnt), float(total_rev), now),
         )
+        conn.commit()
+    return get_stats(db_path)
+
+
+def clear_traffic_logs_db(db_path: Optional[str] = None) -> Dict[str, Any]:
+    """Clear all rows in traffic_logs (preserving real transactions and revenue)."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        conn.execute("DELETE FROM traffic_logs;")
         conn.commit()
     return get_stats(db_path)

@@ -382,6 +382,7 @@
             <button class="btn-stop" onclick="toggleEmergencyStop()">{{ btn_label }}</button>
             <button class="btn-scout" style="background:#059669;" onclick="simulatePurchase()">💳 Simulera Testköp ($0.01)</button>
             <button class="btn-refresh" style="background:#b45309;" onclick="resetSimulations()">🧹 Nollställ Testköp</button>
+            <button class="btn-refresh" style="background:#64748b;" onclick="clearTrafficLogs()">🗑️ Rensa Trafik-Logg</button>
             <button class="btn-scout" onclick="runSelfCheck()">🧪 Kör Själv-Diagnos</button>
             <button class="btn-scout" onclick="toggleVerifyMode()">🔐 Växla On-Chain/Hybrid</button>
             <button class="btn-scout" onclick="runScoutNow()">🔍 Kör Spanar-Agent Nu</button>
@@ -496,6 +497,19 @@
             } else {
                 const err = await res.json();
                 alert("Kunde inte nollställa testköp: " + (err.detail || "Fel"));
+            }
+        }
+
+        async function clearTrafficLogs() {
+            const res = await fetch("/api/admin/clear-traffic", {
+                method: "POST",
+                credentials: "same-origin"
+            });
+            if (res.ok) {
+                window.location.reload();
+            } else {
+                const err = await res.json();
+                alert("Kunde inte rensa trafik-logg: " + (err.detail || "Fel"));
             }
         }
 
