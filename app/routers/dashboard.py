@@ -92,12 +92,15 @@ def verify_admin_pin_with_lockout(
         )
 
     clean_pin = (provided_pin or "").strip()
-    is_valid_admin = bool(
-        clean_pin and secrets.compare_digest(clean_pin, settings.ADMIN_PIN)
-    )
+    if not clean_pin:
+        raise HTTPException(
+            status_code=401,
+            detail="Saknad Admin PIN-kod / Token.",
+        )
+
+    is_valid_admin = secrets.compare_digest(clean_pin, settings.ADMIN_PIN)
     is_valid_scout = bool(
         allow_scout_token
-        and clean_pin
         and secrets.compare_digest(clean_pin, settings.SCOUT_SECRET_TOKEN)
     )
     if not (is_valid_admin or is_valid_scout):
@@ -105,7 +108,7 @@ def verify_admin_pin_with_lockout(
         record_pin_failure_db(client_ip, db_path=db_override)
         raise HTTPException(
             status_code=401,
-            detail="Ogiltig eller saknad Admin PIN-kod / Token.",
+            detail="Ogiltig Admin PIN-kod / Token.",
         )
 
     # Clear failure counter on success
