@@ -444,12 +444,28 @@
             }
         }
 
+        function getAdminPin() {
+            let pin = sessionStorage.getItem("adminPin");
+            if (!pin) {
+                pin = prompt("Ange Admin PIN / Token:");
+                if (pin) sessionStorage.setItem("adminPin", pin);
+            }
+            return pin;
+        }
+
+        async function adminFetch(url) {
+            const pin = getAdminPin();
+            if (!pin) return { error: "PIN saknas" };
+            const res = await fetch(url, { headers: { "X-Admin-Pin": pin } });
+            if (res.status === 401) sessionStorage.removeItem("adminPin");
+            return await res.json();
+        }
+
         async function previewProduct(endpointPath) {
             const box = document.getElementById("productInspectorBox");
             box.style.display = "block";
             box.textContent = "Hämtar live-produkt från " + endpointPath + " ...";
-            const res = await fetch("/api/admin/preview-product?endpoint=" + encodeURIComponent(endpointPath));
-            const data = await res.json();
+            const data = await adminFetch("/api/admin/preview-product?endpoint=" + encodeURIComponent(endpointPath));
             box.textContent = "// LIVE PRODUKT-INSPEKTÖR FÖR: " + endpointPath + "\n" + JSON.stringify(data, null, 2);
         }
 
@@ -457,8 +473,7 @@
             const box = document.getElementById("productInspectorBox");
             box.style.display = "block";
             box.textContent = "Kör själv-diagnos på alla 4 agenter...";
-            const res = await fetch("/api/admin/self-check");
-            const data = await res.json();
+            const data = await adminFetch("/api/admin/self-check");
             box.textContent = "// SJÄLV-DIAGNOS RESULTAT:\n" + JSON.stringify(data, null, 2);
         }
 

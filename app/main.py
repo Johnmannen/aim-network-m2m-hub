@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse
 import httpx
 
 from app.config import settings
+from app.utils import resolve_client_ip
 from app.database import init_db, log_traffic_event
 from app.routers.api_v1 import router as api_v1_router
 from app.routers.dashboard import router as dashboard_router
@@ -58,19 +59,7 @@ async def lifespan(app: FastAPI):
         await app.state.http_client.aclose()
 
 
-def _resolve_client_ip(request: Request) -> str:
-    """
-    Resolve client IP safely. Only trust CF-Connecting-IP / X-Forwarded-For
-    when TRUST_PROXY_HEADERS=true (e.g., behind Cloudflare/Render proxy).
-    """
-    if settings.TRUST_PROXY_HEADERS:
-        cf_ip = request.headers.get("CF-Connecting-IP", "").strip()
-        if cf_ip:
-            return cf_ip
-        xff = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-        if xff:
-            return xff
-    return request.client.host if request.client else "unknown"
+_resolve_client_ip = resolve_client_ip
 
 
 def create_app(db_path: str | None = None) -> FastAPI:

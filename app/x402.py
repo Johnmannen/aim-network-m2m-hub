@@ -57,7 +57,7 @@ def build_402_response(
     vip_str = f"{settings.PRICE_VIP_24H_DEC:.2f}"
     teaser = sample_teaser or {
         "live_feed_verified": True,
-        "sla_latency_ms": "<150ms",
+        "sla_latency_ms": "<150ms server-side (cached)",
         "unlocked_on_payment": [
             "Real-time BTC/ETH/SOL prices & 24h volumes",
             "Fear & Greed Index + Volatility Index",

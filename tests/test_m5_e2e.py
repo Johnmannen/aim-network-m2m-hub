@@ -85,7 +85,7 @@ def test_full_end_to_end_system(tmp_path: Path):
         assert r_replay.status_code == 402
 
         # 5. Check stats via /api/admin/stats & Dashboard HTML
-        r_stats = client.get("/api/admin/stats")
+        r_stats = client.get("/api/admin/stats", headers={"X-Admin-Pin": settings.ADMIN_PIN})
         assert r_stats.status_code == 200
         stats_data = r_stats.json()
         assert stats_data["calls_micro"] == 1

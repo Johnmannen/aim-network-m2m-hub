@@ -562,6 +562,7 @@ def log_traffic_event(
         if (
             path in ("/", "/health", "/favicon.ico")
             or path.startswith("/api/admin")
+            or "aim-keepalive" in (user_agent or "").lower()
         )
         else 0
     )

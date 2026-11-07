@@ -15,6 +15,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from pydantic import BaseModel
 
 from app.config import settings
+from app.utils import resolve_client_ip
 from app.database import (
     check_pin_lockout_db,
     clear_pin_failures_db,
@@ -51,7 +52,7 @@ def verify_admin_pin_with_lockout(
     secrets.compare_digest and enforce brute-force lockout after MAX_PIN_FAILURES
     (persisted in SQLite + in-memory).
     """
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = resolve_client_ip(request)
     db_override = (
         request.app.state.db_path
         if hasattr(request.app, "state") and hasattr(request.app.state, "db_path")
@@ -108,8 +109,12 @@ class ModeToggleRequest(BaseModel):
 
 
 @router.get("/api/admin/stats", response_class=JSONResponse)
-async def admin_stats_endpoint(request: Request) -> dict:
-    """Return live stats, scout discoveries, traffic telemetry, and wallet info."""
+async def admin_stats_endpoint(
+    request: Request,
+    x_admin_pin: Optional[str] = Header(default=None, alias="X-Admin-Pin"),
+) -> dict:
+    """Return live stats, scout discoveries, traffic telemetry, and wallet info (PIN-protected)."""
+    verify_admin_pin_with_lockout(request, x_admin_pin)
     db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
     stats = get_stats(db_override)
     return {
@@ -203,8 +208,10 @@ async def restore_backup_snapshot(
 async def preview_product_payload(
     request: Request,
     endpoint: str = "/api/v1/crypto-pulse",
+    x_admin_pin: Optional[str] = Header(default=None, alias="X-Admin-Pin"),
 ) -> dict:
-    """Inspect the exact live JSON product that a buying AI-bot receives."""
+    """Inspect the exact live JSON product a buying AI-bot receives (PIN-protected, else it bypasses the paywall)."""
+    verify_admin_pin_with_lockout(request, x_admin_pin)
     if endpoint == "/api/v1/crypto-pulse":
         data = await fetch_crypto_pulse_data()
         return {"endpoint": endpoint, "price_usdc": settings.PRICE_MICRO_USDC, "product_payload": data}
@@ -236,8 +243,12 @@ async def preview_product_payload(
 
 
 @router.get("/api/admin/self-check", response_class=JSONResponse)
-async def run_agent_self_diagnosis(request: Request) -> dict:
-    """Run a live health check on all 4 autonomous subsystems/agents."""
+async def run_agent_self_diagnosis(
+    request: Request,
+    x_admin_pin: Optional[str] = Header(default=None, alias="X-Admin-Pin"),
+) -> dict:
+    """Run a live health check on all 4 autonomous subsystems/agents (PIN-protected)."""
+    verify_admin_pin_with_lockout(request, x_admin_pin)
     db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
     stats = get_stats(db_override)
     pulse = await fetch_crypto_pulse_data()
