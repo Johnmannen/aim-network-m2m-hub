@@ -283,7 +283,8 @@ async def preview_product_payload(
     x_admin_pin: Optional[str] = Header(default=None, alias="X-Admin-Pin"),
 ) -> dict:
     """Inspect the exact live JSON product a buying AI-bot receives (PIN-protected, else it bypasses the paywall)."""
-    verify_admin_pin_with_lockout(request, x_admin_pin)
+    if not has_valid_session(request):
+        verify_admin_pin_with_lockout(request, x_admin_pin)
     if endpoint == "/api/v1/crypto-pulse":
         data = await fetch_crypto_pulse_data()
         return {"endpoint": endpoint, "price_usdc": settings.PRICE_MICRO_USDC, "product_payload": data}

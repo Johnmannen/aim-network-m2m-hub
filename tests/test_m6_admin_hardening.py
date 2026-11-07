@@ -71,3 +71,10 @@ def test_forged_session_cookie_rejected(tmp_path):
     c.cookies.set("aim_admin", "9999999999.deadbeef")
     assert "Logga in" in c.get("/").text
     assert c.get("/api/admin/stats").status_code == 401
+
+
+def test_session_unlocks_preview_product(tmp_path):
+    c = _client(tmp_path)
+    assert c.get("/api/admin/preview-product").status_code == 401
+    c.post("/api/admin/login", json={"pin": settings.ADMIN_PIN})
+    assert c.get("/api/admin/preview-product?endpoint=/api/v1/crypto-pulse").status_code == 200
