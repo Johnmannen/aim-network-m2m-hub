@@ -1,0 +1,277 @@
+# Implementation Plan — MDA (AIM Network: Autonomous M2M API Hub)
+# V2 Working Plan — All Milestones M1-M5 Completed & Tested.
+
+plan:
+  project_name: "MDA"
+  version: "V2"
+  created_at: "2026-11-07T12:38:00+01:00"
+  updated_at: "2026-11-07T13:15:00+01:00"
+  status: "COMPLETED"
+  architect: "John Garp"
+  immutable: false
+
+  cost_summary:
+    total_estimated: "0 SEK"
+    free_alternatives_count: 5
+    requires_approval: false
+    gcp_fallback_needed: false
+
+milestones:
+  - id: "M1"
+    title: "Grundstruktur, Konfiguration & Persistent Databas"
+    description: "Sätta upp FastAPI-projektet, miljövariabler (.env med WALLET_ADDRESS och ADMIN_PIN), samt SQLite-databas för persistent lagring av anropsstatistik, intäkter, spanar-logg och förbrukade transaktions-hashar (Replay-skydd)."
+    priority: "CRITICAL"
+    status: "TESTED"
+    estimated_effort: "30 min"
+    dependencies: []
+    challenge_pattern: "Genom att använda SQLite (via inbyggda sqlite3) med WAL-mode istället för en minnes-dict i Python behålls all statistik och skyddet mot återanvända betalningskvitton (tx_hash replay) även vid omstarter."
+    tasks:
+      - id: "T1.1"
+        title: "Skapa projektstruktur och beroenden"
+        description: "Skapa mappstruktur (app/, tests/, scripts/), requirements.txt, .env.example och .gitignore."
+        status: "TESTED"
+        acceptance_criteria:
+          - "requirements.txt innehåller fastapi, uvicorn, httpx, pydantic-settings, pytest"
+          - ".env.example innehåller WALLET_ADDRESS, ADMIN_PIN, X402_VERIFY_MODE och BASE_RPC_URL"
+        cost:
+          estimated: "0 SEK"
+          free_alternative: "Python & FastAPI (Open Source)"
+          requires_approval: false
+          notes: "Helt gratis lokalt och i molnet."
+        steps:
+          - id: "S1.1.1"
+            action: "Skapa requirements.txt, .gitignore och .env.example"
+            details: "Definiera paket och standardinställningar."
+            file_or_location: "c:/Users/johnr/Documents/MDA/requirements.txt"
+            estimated_time: "5 min"
+            status: "TESTED"
+          - id: "S1.1.2"
+            action: "Skapa konfigurationsmodul"
+            details: "Läs in WALLET_ADDRESS, ADMIN_PIN, BASE_RPC_URL och test/prod-läge."
+            file_or_location: "c:/Users/johnr/Documents/MDA/app/config.py"
+            estimated_time: "10 min"
+            status: "TESTED"
+      - id: "T1.2"
+        title: "Implementera SQLite-databas för stats, tx-logg och spanar-förslag"
+        description: "Skapa databaslager som sparar anrop, intäkter i USDC, använda tx-hashar och nya API-förslag."
+        status: "TESTED"
+        acceptance_criteria:
+          - "Tabeller för system_state, used_transactions och discovery_logs skapas automatiskt"
+          - "Stöd för att kontrollera om en tx_hash redan har använts (replay protection)"
+        cost:
+          estimated: "0 SEK"
+          free_alternative: "SQLite3 (Inbyggt i Python)"
+          requires_approval: false
+          notes: "Ingen extern databaskostnad."
+        steps:
+          - id: "S1.2.1"
+            action: "Skapa databasmodul"
+            details: "Funktioner för init_db, record_call, is_tx_used, toggle_pause och get_stats."
+            file_or_location: "c:/Users/johnr/Documents/MDA/app/database.py"
+            estimated_time: "15 min"
+            status: "TESTED"
+    section_test:
+      auto_test: true
+      auto_fix: true
+      test_strategy: "Kör pytest mot databasmodulen och konfigurationen för att verifiera att stats, paus-status och replay-skydd fungerar."
+      notify_user: true
+
+  - id: "M2"
+    title: "x402 Betalväxel, On-Chain Base RPC-Verifiering & Replay-Skydd"
+    description: "Bygga HTTP 402 Payment Required middleware/dependency som både kan verifiera riktiga USDC-transaktioner på Base Mainnet via gratis publik RPC och stödja test-kvitton i lokalt testläge."
+    priority: "CRITICAL"
+    status: "TESTED"
+    estimated_effort: "45 min"
+    dependencies: ["M1"]
+    challenge_pattern: "Kombinerar omedelbar x402-kompatibilitet med riktig on-chain verifiering mot Base Mainnet (https://mainnet.base.org) genom att kontrollera ERC-20 Transfer-loggar för USDC (0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913) till Johns plånboksadress, utan att kosta en krona i RPC-avgifter."
+    tasks:
+      - id: "T2.1"
+        title: "Bygg x402 Payment Verifier & HTTP 402-svar"
+        description: "Implementera kontroll av X-PAYMENT-PROOF header, on-chain verifiering mot Base RPC samt replay-spärr."
+        status: "TESTED"
+        acceptance_criteria:
+          - "Anrop utan X-PAYMENT-PROOF ger HTTP 402 med komplett x402 JSON-specifikation (network: base-mainnet, token: USDC, amount, recipient)"
+          - "När systemet är pausat (Nödstopp) returneras HTTP 503 Service Paused"
+          - "Återanvänd tx_hash nekas med HTTP 402/409 (Replay-skydd)"
+          - "Stödjer både skarp Base RPC-kontroll och simulerad verifiering för enhetstester"
+        cost:
+          estimated: "0 SEK"
+          free_alternative: "Publik Base Mainnet RPC (https://mainnet.base.org)"
+          requires_approval: false
+          notes: "0 kr för läsanrop mot blockkedjan."
+        steps:
+          - id: "S2.1.1"
+            action: "Skapa x402 betalningsmodul"
+            details: "Implementera require_x402_payment och verify_base_usdc_transaction."
+            file_or_location: "c:/Users/johnr/Documents/MDA/app/x402.py"
+            estimated_time: "30 min"
+            status: "TESTED"
+    section_test:
+      auto_test: true
+      auto_fix: true
+      test_strategy: "Kör enhetstester för saknad header (402), giltigt betalningsbevis (200), återanvänd tx_hash (nekas) och nödstopp (503)."
+      notify_user: true
+
+  - id: "M3"
+    title: "Live M2M API-Tjänster (Nivå 1: $0.01 & Nivå 2: $1.00)"
+    description: "Implementera de två säljbara API-ändpunkterna med riktig live-data från öppna gratis-API:er (CoinGecko, Fear & Greed Index, DexScreener) med smart caching och fallback."
+    priority: "HIGH"
+    status: "TESTED"
+    estimated_effort: "45 min"
+    dependencies: ["M2"]
+    challenge_pattern: "För att garantera svarstid under 0,5 sekunder (Framgångsfaktor #2 i PDF:en) lägger vi in en in-memory TTL-cache (60 sek) framför de externa API-anropen samt en garanterad fallback om ett externt API tillfälligt svarar långsamt."
+    tasks:
+      - id: "T3.1"
+        title: "Implementera Nivå 1: /api/v1/crypto-pulse ($0.01 USDC)"
+        description: "Snabb mikro-data med live-priser (BTC, ETH, SOL), 24h-förändring, Fear & Greed-sentiment och volatilitetsindex."
+        status: "TESTED"
+        acceptance_criteria:
+          - "Kräver 0.01 USDC via x402"
+          - "Returnerar strukturerad realtids-JSON på under 500 ms (via cache/live-fetch)"
+        cost:
+          estimated: "0 SEK"
+          free_alternative: "CoinGecko Public API + Alternative.me Fear & Greed API"
+          requires_approval: false
+          notes: "Gratis öppna API:er utan API-nyckelkrav."
+        steps:
+          - id: "S3.1.1"
+            action: "Skapa datatjänst för live marknadsdata"
+            details: "Asynkron hämtning med httpx och 60s TTL-cache."
+            file_or_location: "c:/Users/johnr/Documents/MDA/app/services/market_data.py"
+            estimated_time: "25 min"
+            status: "TESTED"
+      - id: "T3.2"
+        title: "Implementera Nivå 2: /api/v1/deep-market-report ($1.00 USDC)"
+        description: "Djupgående kvantitativ M2M-marknads- och likviditetsrapport (Base-ekosystemet, volymtrender, momentum-signaler och riskmatris)."
+        status: "TESTED"
+        acceptance_criteria:
+          - "Kräver 1.00 USDC via x402"
+          - "Levererar djupgående JSON-rapport med actionable_signals och likviditetsanalys"
+        cost:
+          estimated: "0 SEK"
+          free_alternative: "Aggregerad analys från CoinGecko + DexScreener Public API"
+          requires_approval: false
+          notes: "0 kr i datakostnad."
+        steps:
+          - id: "S3.2.1"
+            action: "Lägg till deep-market-report generator och API-routes"
+            details: "Koppla ihop datatjänsten med FastAPI-endpoints och x402-skydd."
+            file_or_location: "c:/Users/johnr/Documents/MDA/app/routers/api_v1.py"
+            estimated_time: "20 min"
+            status: "TESTED"
+    section_test:
+      auto_test: true
+      auto_fix: true
+      test_strategy: "Testa båda API-ändpunkterna med och utan betalningsheader och validera JSON-schemat och svarstiden."
+      notify_user: true
+
+  - id: "M4"
+    title: "Själv-Marknadsföring (Discovery Manifests) & Autonom Spanar-Modul"
+    description: "Skapa maskinläsbara katalogfiler (/llms.txt, /agents.json, /.well-known/ai-plugin.json) samt spanar-modulen (/cron/discover) som identifierar nya efterfrågade M2M-datakällor."
+    priority: "HIGH"
+    status: "TESTED"
+    estimated_effort: "30 min"
+    dependencies: ["M3"]
+    challenge_pattern: "Utöver /llms.txt och /agents.json exponerar vi även /.well-known/agent.json (A2A-standard) och rik OpenAPI-metadata så att alla typer av AI-agenter och MCP-kataloger förstår priser och betalningsinstruktioner direkt."
+    tasks:
+      - id: "T4.1"
+        title: "Skapa /llms.txt, /agents.json och /.well-known/agent.json"
+        description: "Dynamiska manifestfiler som alltid visar aktuell plånboksadress, priser och aktiva endpoints."
+        status: "TESTED"
+        acceptance_criteria:
+          - "GET /llms.txt returnerar tydlig markdown-dokumentation för LLM:er"
+          - "GET /agents.json returnerar maskinläsbar JSON med x402-betalningskrav och Base-adress"
+        cost:
+          estimated: "0 SEK"
+          free_alternative: "Inbyggda FastAPI-routes"
+          requires_approval: false
+          notes: ""
+        steps:
+          - id: "S4.1.1"
+            action: "Implementera discovery-routes"
+            details: "Skapa routes för /llms.txt, /agents.json och /.well-known/agent.json."
+            file_or_location: "c:/Users/johnr/Documents/MDA/app/routers/discovery.py"
+            estimated_time: "15 min"
+            status: "TESTED"
+      - id: "T4.2"
+        title: "Implementera Autonom Spanar-modul (/cron/discover)"
+        description: "Skapa spanar-endpoint och skript som analyserar trender (t.ex. hetaste krypto/AI-narrativen och utviklarbehov) och loggar färdiga API-förslag i databasen."
+        status: "TESTED"
+        acceptance_criteria:
+          - "POST/GET /cron/discover genererar och sparar nya konkreta API-förslag i discovery_logs"
+          - "Visas i Overseer Dashboard under Spanar-logg"
+        cost:
+          estimated: "0 SEK"
+          free_alternative: "Öppna trend-API:er (CoinGecko Trending / HackerNews / GitHub API)"
+          requires_approval: false
+          notes: ""
+        steps:
+          - id: "S4.2.1"
+            action: "Skapa spanar-tjänst och route"
+            details: "Hämtar aktuella trender och skapar strukturerade förslag på nya mikro-API:er."
+            file_or_location: "c:/Users/johnr/Documents/MDA/app/services/scout.py"
+            estimated_time: "15 min"
+            status: "TESTED"
+    section_test:
+      auto_test: true
+      auto_fix: true
+      test_strategy: "Verifiera att /llms.txt, /agents.json och /cron/discover returnerar 200 OK med korrekt struktur."
+      notify_user: true
+
+  - id: "M5"
+    title: "Overseer Dashboard (/), PIN-skyddat Nödstopp & Produktionspaket"
+    description: "Bygga det responsiva Overseer Dashboard-gränssnittet i mörk terminal/command-center-stil med PIN-skyddad Nödstopp-knapp, Spanar-trigger och färdig Render/Docker-konfiguration."
+    priority: "HIGH"
+    status: "TESTED"
+    estimated_effort: "40 min"
+    dependencies: ["M4"]
+    challenge_pattern: "Nödstopp-knappen och manuella admin-triggers säkras med X-Admin-Pin / PIN-prompt i UI:t så att inga utomstående eller botar kan pausa din butik."
+    tasks:
+      - id: "T5.1"
+        title: "Bygg Overseer Dashboard (/) och Admin-endpoints"
+        description: "Mörkt gränssnitt (#111 / #4ade80) för mobil och dator med realtidsstatus, intäkter, aktiva tjänster, spanar-logg och PIN-skyddat Nödstopp."
+        status: "TESTED"
+        acceptance_criteria:
+          - "GET / visar Overseer Dashboard med live-siffror från SQLite"
+          - "POST /api/admin/toggle-pause kräver giltig ADMIN_PIN och växlar mellan ONLINE och PAUSED"
+        cost:
+          estimated: "0 SEK"
+          free_alternative: "Server-renderad HTML5/CSS/JS i FastAPI"
+          requires_approval: false
+          notes: ""
+        steps:
+          - id: "S5.1.1"
+            action: "Skapa dashboard-vy och admin-API"
+            details: "Implementera responsiv HTML-dashboard och PIN-validerade admin-endpoints."
+            file_or_location: "c:/Users/johnr/Documents/MDA/app/routers/dashboard.py"
+            estimated_time: "25 min"
+            status: "TESTED"
+      - id: "T5.2"
+        title: "Skapa main.py, render.yaml och End-to-End-testsvit"
+        description: "Koppla ihop hela applikationen i app/main.py, skapa render.yaml för 1-klicks gratis deploy samt komplett E2E-testsvit."
+        status: "TESTED"
+        acceptance_criteria:
+          - "render.yaml och Procfile är redo för Render.com Free Tier"
+          - "Samtliga E2E-tester passerar grönt"
+        cost:
+          estimated: "0 SEK"
+          free_alternative: "Render Free Tier"
+          requires_approval: false
+          notes: ""
+        steps:
+          - id: "S5.2.1"
+            action: "Skapa app/main.py och render.yaml"
+            details: "Sammanfoga alla routers och skapa deploy-konfiguration."
+            file_or_location: "c:/Users/johnr/Documents/MDA/app/main.py"
+            estimated_time: "15 min"
+            status: "TESTED"
+    section_test:
+      auto_test: true
+      auto_fix: true
+      test_strategy: "Kör fullständig End-to-End testsvit (pytest) som testar hela flödet från discovery till 402-krav, betalning, leverans, dashboard och nödstopp."
+      notify_user: true
+
+dev_log:
+  file: "MDA_DEV_LOG_2026-11-07.md"
+  auto_fix_entries: 0
+  test_entries: 9

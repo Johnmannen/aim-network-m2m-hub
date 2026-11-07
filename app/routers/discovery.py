@@ -1,0 +1,111 @@
+"""
+Self-Marketing & AI Agent Discovery Router:
+- GET /llms.txt (Standard LLM manifest for OpenAI, Anthropic, Perplexity & M2M crawlers)
+- GET /agents.json (x402 & MCP catalog specification)
+- GET /.well-known/agent.json (A2A Agent Card specification)
+- GET/POST /cron/discover (Autonomous Scout trigger)
+"""
+
+from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse, PlainTextResponse
+
+from app.config import settings
+from app.services.scout import run_autonomous_scout
+
+router = APIRouter(tags=["AI Discovery & Autonomous Scout"])
+
+
+@router.get("/llms.txt", response_class=PlainTextResponse)
+async def llms_txt_manifest() -> str:
+    """Machine-readable Markdown manifest for LLM crawlers and autonomous buying agents."""
+    return f"""# AIM Network — Autonomous M2M API Hub
+> Ultra-fast (<150ms cached) machine-payable data endpoints via HTTP 402 (x402 protocol) on Base Mainnet (Chain ID 8453).
+> No account or API key required. Pay per call in USDC on Base and pass transaction hash in `X-PAYMENT-PROOF` header.
+
+## Payment Configuration (x402 v1.0)
+- **Network:** `base-mainnet` (Chain ID: `8453`)
+- **Token:** `USDC` (`{settings.USDC_CONTRACT_ADDRESS}`)
+- **Recipient Wallet:** `{settings.WALLET_ADDRESS}`
+- **Proof Header:** `X-PAYMENT-PROOF: <0x_base_transaction_hash>`
+
+## Available M2M Endpoints
+1. `GET /api/v1/crypto-pulse`
+   - **Price:** `{settings.PRICE_MICRO_USDC:.2f} USDC`
+   - **Description:** Real-time BTC/ETH/SOL prices, 24h volatility index, and Fear & Greed sentiment JSON.
+2. `GET /api/v1/deep-market-report`
+   - **Price:** `{settings.PRICE_PREMIUM_USDC:.2f} USDC`
+   - **Description:** Institutional M2M quantitative market regime, Base L2 liquidity metrics, and actionable trading signals JSON.
+
+## Machine Catalogs
+- Agent Catalog: `/agents.json`
+- A2A Agent Card: `/.well-known/agent.json`
+- OpenAPI Schema: `/openapi.json`
+"""
+
+
+@router.get("/agents.json", response_class=JSONResponse)
+async def agents_json_manifest() -> dict:
+    """Standardized x402 & M2M agent catalog."""
+    return {
+        "schema_version": "1.0",
+        "name": settings.PROJECT_NAME,
+        "description": "Autonomous M2M Data & Quantitative Intelligence Hub payable via HTTP 402 (x402) on Base L2.",
+        "auth": {
+            "type": "x402",
+            "version": "1.0",
+            "network": "base-mainnet",
+            "chain_id": 8453,
+            "token": "USDC",
+            "token_contract": settings.USDC_CONTRACT_ADDRESS,
+            "recipient_wallet": settings.WALLET_ADDRESS,
+            "header_name": "X-PAYMENT-PROOF",
+        },
+        "endpoints": [
+            {
+                "id": "crypto-pulse",
+                "path": "/api/v1/crypto-pulse",
+                "method": "GET",
+                "tier": "micro",
+                "price_usdc": settings.PRICE_MICRO_USDC,
+                "currency": "USDC",
+                "network": "base-mainnet",
+                "sla_target_ms": 150,
+                "description": "Real-time crypto market pulse, Fear & Greed sentiment, and 24h volatility index.",
+            },
+            {
+                "id": "deep-market-report",
+                "path": "/api/v1/deep-market-report",
+                "method": "GET",
+                "tier": "premium",
+                "price_usdc": settings.PRICE_PREMIUM_USDC,
+                "currency": "USDC",
+                "network": "base-mainnet",
+                "sla_target_ms": 200,
+                "description": "Deep quantitative M2M market report, Base L2 liquidity analysis, and actionable trading signals.",
+            },
+        ],
+        "discovery": {
+            "llms_txt": "/llms.txt",
+            "openapi_url": "/openapi.json",
+            "well_known_agent": "/.well-known/agent.json",
+        },
+    }
+
+
+@router.get("/.well-known/agent.json", response_class=JSONResponse)
+async def well_known_agent_card() -> dict:
+    """A2A-compatible Agent Card for autonomous multi-agent ecosystems."""
+    return await agents_json_manifest()
+
+
+@router.api_route("/cron/discover", methods=["GET", "POST"], response_class=JSONResponse)
+async def trigger_autonomous_scout(request: Request) -> dict:
+    """Run the Autonomous Scout to discover and log new M2M API opportunities."""
+    db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
+    entry = await run_autonomous_scout(db_path=db_override)
+    return {
+        "status": "success",
+        "message": "Autonomous Scout identified a new high-demand M2M API opportunity.",
+        "discovery": entry,
+    }
+

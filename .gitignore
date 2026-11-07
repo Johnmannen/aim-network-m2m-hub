@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+
+# Environment & Secrets
+.env
+
+# Database
+*.db
+*.db-shm
+*.db-wal
+data/
+
+# Pytest
+.pytest_cache/
+
