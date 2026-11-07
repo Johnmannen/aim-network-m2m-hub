@@ -195,3 +195,58 @@ def test_admin_cookie_requests_excluded_from_external_traffic_and_clear_traffic(
     clr = c.post("/api/admin/clear-traffic")
     assert clr.status_code == 200
     assert clr.json()["stats"]["traffic_telemetry"]["total_external_requests"] == 0
+
+
+def test_mcp_jsonrpc_handshake_and_glama_claim(tmp_path):
+    c = _client(tmp_path)
+    # 1. Verify Glama claim token at both /mcp/.well-known/glama.json and /.well-known/glama.json
+    for glama_path in ("/mcp/.well-known/glama.json", "/.well-known/glama.json"):
+        r_claim = c.get(glama_path)
+        assert r_claim.status_code == 200
+        assert r_claim.json()["claim"] == "glama_claim_kMQwR0tBTjmF1CxnpiYj2Cgs6m2DT753"
+
+    # 2. Verify MCP JSON-RPC 2.0 initialize -> notifications/initialized -> tools/list -> tools/call
+    r_init = c.post(
+        "/mcp",
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "glama-healthcheck", "version": "1.0.0"},
+            },
+        },
+    )
+    assert r_init.status_code == 200
+    assert r_init.json()["result"]["serverInfo"]["name"] == "aim-network-m2m-hub"
+
+    r_notif = c.post(
+        "/mcp",
+        json={"jsonrpc": "2.0", "method": "notifications/initialized"},
+    )
+    assert r_notif.status_code == 202
+
+    r_tools = c.post(
+        "/mcp",
+        json={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+    )
+    assert r_tools.status_code == 200
+    tools = r_tools.json()["result"]["tools"]
+    assert len(tools) >= 4
+    for t in tools:
+        assert "inputSchema" in t
+        assert t["inputSchema"]["type"] == "object"
+
+    r_call = c.post(
+        "/mcp",
+        json={
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {"name": "get_free_market_teaser", "arguments": {}},
+        },
+    )
+    assert r_call.status_code == 200
+    assert r_call.json()["result"]["isError"] is False

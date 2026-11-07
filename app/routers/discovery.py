@@ -6,14 +6,20 @@ Self-Marketing & AI Agent Discovery Router:
 - GET/POST /cron/discover (Autonomous Scout trigger)
 """
 
+import json
 import secrets
-from typing import Optional
+from typing import Any, Optional
 from fastapi import APIRouter, Header, HTTPException, Request
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
 
 from app.config import settings
 from app.database import get_stats
 from app.routers.dashboard import verify_admin_pin_with_lockout
+from app.services.market_data import (
+    fetch_base_dex_radar,
+    fetch_crypto_pulse_data,
+    fetch_deep_market_report,
+)
 from app.services.scout import run_autonomous_scout
 
 router = APIRouter(tags=["AI Discovery & Autonomous Scout"])
@@ -204,11 +210,16 @@ async def well_known_agent_card(request: Request) -> dict:
     return await agents_json_manifest(request)
 
 
+GLAMA_CLAIM_TOKEN = "glama_claim_kMQwR0tBTjmF1CxnpiYj2Cgs6m2DT753"
+
+
+@router.get("/mcp/.well-known/glama.json", response_class=JSONResponse)
 @router.get("/.well-known/glama.json", response_class=JSONResponse)
 async def well_known_glama_manifest() -> dict:
-    """Glama.ai MCP Directory ownership & metadata verification manifest."""
+    """Glama.ai MCP Directory ownership & claim verification manifest."""
     return {
         "$schema": "https://glama.ai/mcp/schemas/connector.json",
+        "claim": GLAMA_CLAIM_TOKEN,
         "name": "aim-network-m2m-hub",
         "description": "Autonomous M2M crypto market pulse, Base L2 DEX whale liquidity radar, and quantitative trading signals via HTTP 402 (x402) USDC micropayments on Base.",
         "url": "https://johngarp.click/mcp",
@@ -240,50 +251,216 @@ async def trigger_autonomous_scout(
     }
 
 
-@router.api_route("/mcp", methods=["GET", "POST"], response_class=JSONResponse)
-async def mcp_server_endpoint(request: Request) -> dict:
-    """
-    Model Context Protocol (MCP) Discovery & Tool Definition Endpoint.
-    Allows MCP directories (Smithery, mcp.so, Glama) and LLM agents to inspect and invoke AIM Network tools.
-    """
-    tools = [
+def _build_mcp_tools() -> list[dict[str, Any]]:
+    """Build standard MCP-compliant tool definitions with valid JSON Schema inputSchema."""
+    proof_schema = {
+        "type": "object",
+        "properties": {
+            "payment_proof": {
+                "type": "string",
+                "description": (
+                    f"Optional Base Mainnet (Chain ID 8453) USDC transaction hash to recipient "
+                    f"{settings.WALLET_ADDRESS}, or a 24h VIP Pass tx_hash."
+                ),
+            }
+        },
+        "additionalProperties": False,
+    }
+    return [
         {
             "name": "get_free_market_teaser",
-            "description": "Free instant verification of live BTC spot price and M2M feed status ($0.00 USDC).",
-            "endpoint": "https://johngarp.click/api/v1/free-teaser",
-            "price_usdc": 0.0,
+            "description": "Free instant verification of live BTC spot price and M2M feed status ($0.00 USDC). Endpoint: https://johngarp.click/api/v1/free-teaser",
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
         },
         {
             "name": "get_crypto_pulse",
-            "description": "Real-time BTC, ETH, SOL prices, 24h volatility index, and Fear & Greed sentiment ($0.01 USDC via x402 on Base).",
-            "endpoint": "https://johngarp.click/api/v1/crypto-pulse",
-            "price_usdc": settings.PRICE_MICRO_USDC,
+            "description": f"Real-time BTC, ETH, SOL prices, 24h volatility index, and Fear & Greed sentiment (${settings.PRICE_MICRO_USDC:.2f} USDC via x402 on Base). Endpoint: https://johngarp.click/api/v1/crypto-pulse",
+            "inputSchema": proof_schema,
         },
         {
             "name": "get_base_dex_radar",
-            "description": "Real-time Base L2 DEX liquidity pools, volume spikes, and whale inflow signals ($0.05 USDC via x402 on Base).",
-            "endpoint": "https://johngarp.click/api/v1/base-dex-radar",
-            "price_usdc": settings.PRICE_DEX_RADAR_USDC,
+            "description": f"Real-time Base L2 DEX liquidity pools, volume spikes, and whale inflow signals (${settings.PRICE_DEX_RADAR_USDC:.2f} USDC via x402 on Base). Endpoint: https://johngarp.click/api/v1/base-dex-radar",
+            "inputSchema": proof_schema,
         },
         {
             "name": "get_deep_market_report",
-            "description": "Institutional M2M quantitative market regime, Base L2 liquidity metrics, and actionable trading signals ($1.00 USDC via x402 on Base).",
-            "endpoint": "https://johngarp.click/api/v1/deep-market-report",
-            "price_usdc": settings.PRICE_PREMIUM_USDC,
+            "description": f"Institutional M2M quantitative market regime, Base L2 liquidity metrics, and actionable trading signals (${settings.PRICE_PREMIUM_USDC:.2f} USDC via x402 on Base). Endpoint: https://johngarp.click/api/v1/deep-market-report",
+            "inputSchema": proof_schema,
         },
     ]
-    return {
-        "mcp_version": "2025-03-26",
-        "server_name": "aim-network-m2m-hub",
-        "canonical_url": "https://johngarp.click/mcp",
-        "payment_protocol": {
-            "type": "x402",
-            "network": "base-mainnet",
-            "chain_id": 8453,
-            "token": "USDC",
-            "recipient_wallet": settings.WALLET_ADDRESS,
-            "vip_24h_pass_usdc": settings.PRICE_VIP_24H_USDC,
-        },
-        "tools": tools,
-    }
+
+
+@router.api_route("/mcp", methods=["GET", "POST"])
+async def mcp_server_endpoint(request: Request) -> Response:
+    """
+    Model Context Protocol (MCP) Streamable HTTP / JSON-RPC 2.0 Server Endpoint.
+    Supports MCP JSON-RPC methods (`initialize`, `notifications/initialized`, `ping`,
+    `tools/list`, `tools/call`, `resources/list`, `prompts/list`) for Glama, Smithery & Claude Desktop,
+    as well as human/crawler GET discovery.
+    """
+    tools = _build_mcp_tools()
+
+    if request.method == "POST":
+        try:
+            body = await request.json()
+        except Exception:
+            body = None
+
+        if isinstance(body, dict) and "jsonrpc" in body:
+            rpc_id = body.get("id")
+            method = body.get("method", "")
+            params = body.get("params") or {}
+
+            # 1. JSON-RPC Notifications (no id -> 202 Accepted)
+            if rpc_id is None or method.startswith("notifications/"):
+                return Response(status_code=202)
+
+            # 2. initialize handshake
+            if method == "initialize":
+                client_proto = (
+                    params.get("protocolVersion")
+                    if isinstance(params, dict)
+                    else None
+                ) or "2024-11-05"
+                return JSONResponse(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": rpc_id,
+                        "result": {
+                            "protocolVersion": client_proto,
+                            "capabilities": {
+                                "tools": {"listChanged": False},
+                            },
+                            "serverInfo": {
+                                "name": "aim-network-m2m-hub",
+                                "version": settings.VERSION,
+                            },
+                        },
+                    }
+                )
+
+            # 3. ping
+            if method == "ping":
+                return JSONResponse({"jsonrpc": "2.0", "id": rpc_id, "result": {}})
+
+            # 4. tools/list
+            if method == "tools/list":
+                return JSONResponse(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": rpc_id,
+                        "result": {"tools": tools},
+                    }
+                )
+
+            # 5. resources/list & prompts/list
+            if method == "resources/list":
+                return JSONResponse(
+                    {"jsonrpc": "2.0", "id": rpc_id, "result": {"resources": []}}
+                )
+            if method == "prompts/list":
+                return JSONResponse(
+                    {"jsonrpc": "2.0", "id": rpc_id, "result": {"prompts": []}}
+                )
+
+            # 6. tools/call
+            if method == "tools/call":
+                tool_name = params.get("name", "") if isinstance(params, dict) else ""
+                if tool_name == "get_free_market_teaser":
+                    pulse = await fetch_crypto_pulse_data()
+                    teaser_data = {
+                        "status": "LIVE_FEED_VERIFIED",
+                        "price_usdc": 0.0,
+                        "btc_spot_preview_usd": pulse["assets"]["BTC"]["price_usd"],
+                        "market_sentiment_preview": pulse["market_sentiment"],
+                        "payment_recipient_base_usdc": settings.WALLET_ADDRESS,
+                    }
+                    return JSONResponse(
+                        {
+                            "jsonrpc": "2.0",
+                            "id": rpc_id,
+                            "result": {
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": json.dumps(teaser_data),
+                                    }
+                                ],
+                                "isError": False,
+                            },
+                        }
+                    )
+
+                # Paid tools return x402 payment instructions via MCP tool content
+                endpoint_map = {
+                    "get_crypto_pulse": ("/api/v1/crypto-pulse", settings.PRICE_MICRO_USDC),
+                    "get_base_dex_radar": ("/api/v1/base-dex-radar", settings.PRICE_DEX_RADAR_USDC),
+                    "get_deep_market_report": ("/api/v1/deep-market-report", settings.PRICE_PREMIUM_USDC),
+                }
+                if tool_name in endpoint_map:
+                    ep_path, ep_price = endpoint_map[tool_name]
+                    quote_info = {
+                        "status": "PAYMENT_REQUIRED_X402",
+                        "endpoint": f"https://johngarp.click{ep_path}",
+                        "amount_usdc": ep_price,
+                        "network": "base-mainnet (Chain ID 8453)",
+                        "token_contract": settings.USDC_CONTRACT_ADDRESS,
+                        "recipient_wallet": settings.WALLET_ADDRESS,
+                        "header": "X-PAYMENT-PROOF: <0x_base_tx_hash>",
+                    }
+                    return JSONResponse(
+                        {
+                            "jsonrpc": "2.0",
+                            "id": rpc_id,
+                            "result": {
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": json.dumps(quote_info),
+                                    }
+                                ],
+                                "isError": False,
+                            },
+                        }
+                    )
+
+                return JSONResponse(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": rpc_id,
+                        "error": {
+                            "code": -32602,
+                            "message": f"Unknown tool: {tool_name}",
+                        },
+                    }
+                )
+
+            return JSONResponse(
+                {
+                    "jsonrpc": "2.0",
+                    "id": rpc_id,
+                    "error": {"code": -32601, "message": f"Method not found: {method}"},
+                }
+            )
+
+    return JSONResponse(
+        {
+            "mcp_version": "2025-03-26",
+            "server_name": "aim-network-m2m-hub",
+            "canonical_url": "https://johngarp.click/mcp",
+            "payment_protocol": {
+                "type": "x402",
+                "network": "base-mainnet",
+                "chain_id": 8453,
+                "token": "USDC",
+                "recipient_wallet": settings.WALLET_ADDRESS,
+                "vip_24h_pass_usdc": settings.PRICE_VIP_24H_USDC,
+            },
+            "tools": tools,
+        }
+    )
 

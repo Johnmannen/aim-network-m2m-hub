@@ -586,6 +586,7 @@ def log_traffic_event(
         "/agents.json",
         "/.well-known/agent.json",
         "/.well-known/glama.json",
+        "/mcp/.well-known/glama.json",
         "/mcp",
         "/openapi.json",
         "/docs",
