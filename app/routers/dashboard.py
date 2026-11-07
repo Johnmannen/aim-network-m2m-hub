@@ -15,7 +15,12 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from pydantic import BaseModel
 
 from app.config import settings
-from app.database import get_stats, set_pause_state
+from app.database import (
+    export_db_snapshot,
+    get_stats,
+    import_db_snapshot,
+    set_pause_state,
+)
 from app.services.market_data import (
     fetch_base_dex_radar,
     fetch_crypto_pulse_data,
@@ -133,6 +138,32 @@ async def toggle_verify_mode(
     )
     settings.X402_VERIFY_MODE = next_mode
     return {"status": "updated", "verify_mode": settings.X402_VERIFY_MODE}
+
+
+@router.get("/api/admin/backup-snapshot", response_class=JSONResponse)
+async def get_backup_snapshot(request: Request) -> dict:
+    """
+    Export non-sensitive SQLite telemetry & state snapshot so the GitHub Gist
+    cloud backup can persist traffic, discoveries, dynamic endpoints, and used tx hashes
+    across Render Free Tier container restarts.
+    """
+    db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
+    return export_db_snapshot(db_override)
+
+
+@router.post("/api/admin/restore-snapshot", response_class=JSONResponse)
+async def restore_backup_snapshot(
+    request: Request,
+    snapshot: dict,
+    x_admin_pin: Optional[str] = Header(default=None, alias="X-Admin-Pin"),
+    x_scout_token: Optional[str] = Header(default=None, alias="X-Scout-Token"),
+) -> dict:
+    """Restore/merge SQLite snapshot if container restarted (requires auth token)."""
+    provided = (x_scout_token or x_admin_pin or "").strip()
+    verify_admin_pin_with_lockout(request, provided)
+    db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
+    updated_stats = import_db_snapshot(snapshot, db_override)
+    return {"status": "restored", "stats": updated_stats}
 
 
 @router.get("/api/admin/preview-product", response_class=JSONResponse)

@@ -462,9 +462,19 @@
             box.textContent = "// SJÄLV-DIAGNOS RESULTAT:\n" + JSON.stringify(data, null, 2);
         }
 
-        setInterval(() => {
-            window.location.reload();
-        }, 30000);
+        // Auto-refresh Dashboard var 30:e sekund via fetch så sidan uppdateras mjukt utan att tappa scroll-position
+        setInterval(async () => {
+            try {
+                const r = await fetch(window.location.href, { cache: "no-store" });
+                if (r.ok && document.getElementById("productInspectorBox").style.display !== "block") {
+                    const html = await r.text();
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(html, "text/html");
+                    document.body.innerHTML = doc.body.innerHTML;
+                }
+            } catch (e) {}
+        }, 15000);
     </script>
 </body>
 </html>
+

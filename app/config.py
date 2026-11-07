@@ -81,10 +81,14 @@ class Settings:
         os.getenv("SCOUT_AUTOPILOT_ENABLED", "true").lower() == "true"
     )
 
-    # SQLite database path
+    # SQLite database path & Automatic Cloud Backup Gist
     DATABASE_PATH: str = os.getenv(
         "DATABASE_PATH", str(BASE_DIR / "data" / "aim_network.db")
     )
+    BACKUP_GIST_ID: str = os.getenv(
+        "BACKUP_GIST_ID", "5a21a4697eacdb1311972b0a8c24e314"
+    )
+    GITHUB_BACKUP_TOKEN: str = os.getenv("GITHUB_BACKUP_TOKEN", "")
 
 
 settings = Settings()

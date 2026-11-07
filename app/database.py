@@ -601,5 +601,145 @@ def log_traffic_event(
         conn.commit()
 
 
+def export_db_snapshot(db_path: Optional[str] = None) -> Dict[str, Any]:
+    """Export all SQLite tables as a JSON-serializable snapshot for persistent cloud backup."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        state_row = conn.execute("SELECT * FROM system_state WHERE id = 1;").fetchone()
+        used_txs = conn.execute("SELECT * FROM used_transactions;").fetchall()
+        discoveries = conn.execute("SELECT * FROM discovery_logs;").fetchall()
+        dyn_eps = conn.execute("SELECT * FROM dynamic_endpoints;").fetchall()
+        vip_rows = conn.execute("SELECT * FROM vip_passes;").fetchall()
+        traffic_rows = conn.execute(
+            "SELECT * FROM traffic_logs ORDER BY id DESC LIMIT 1000;"
+        ).fetchall()
+
+        return {
+            "snapshot_version": "1.0",
+            "exported_at": datetime.now(timezone.utc).isoformat(),
+            "system_state": dict(state_row) if state_row else {},
+            "used_transactions": [dict(r) for r in used_txs],
+            "discovery_logs": [dict(r) for r in discoveries],
+            "dynamic_endpoints": [dict(r) for r in dyn_eps],
+            "vip_passes": [dict(r) for r in vip_rows],
+            "traffic_logs": [dict(r) for r in reversed(traffic_rows)],
+        }
+
+
+def import_db_snapshot(
+    snapshot: Dict[str, Any], db_path: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Merge a cloud backup snapshot into SQLite (idempotent).
+    Restores revenue, call counts, used transactions, VIP passes, dynamic endpoints, and traffic logs
+    if the container was restarted on Render Free Tier.
+    """
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        st = snapshot.get("system_state") or {}
+        if st:
+            cur_st = conn.execute(
+                "SELECT * FROM system_state WHERE id = 1;"
+            ).fetchone()
+            new_micro = max(int(cur_st["calls_micro"]), int(st.get("calls_micro", 0)))
+            new_prem = max(
+                int(cur_st["calls_premium"]), int(st.get("calls_premium", 0))
+            )
+            new_rev = max(
+                float(cur_st["revenue_usdc"]), float(st.get("revenue_usdc", 0.0))
+            )
+            conn.execute(
+                """
+                UPDATE system_state
+                SET calls_micro = ?, calls_premium = ?, revenue_usdc = ?
+                WHERE id = 1;
+                """,
+                (new_micro, new_prem, new_rev),
+            )
+
+        for tx in snapshot.get("used_transactions", []):
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO used_transactions
+                (tx_hash, endpoint, amount_usdc, payer_address, verified_mode, created_at)
+                VALUES (?, ?, ?, ?, ?, ?);
+                """,
+                (
+                    tx["tx_hash"],
+                    tx["endpoint"],
+                    tx["amount_usdc"],
+                    tx.get("payer_address", "unknown"),
+                    tx.get("verified_mode", "onchain"),
+                    tx["created_at"],
+                ),
+            )
+
+        for ep in snapshot.get("dynamic_endpoints", []):
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO dynamic_endpoints
+                (slug, endpoint_path, asset_name, asset_symbol, coingecko_id, price_usdc, calls_count, revenue_usdc, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+                """,
+                (
+                    ep["slug"],
+                    ep["endpoint_path"],
+                    ep["asset_name"],
+                    ep["asset_symbol"],
+                    ep["coingecko_id"],
+                    ep["price_usdc"],
+                    ep.get("calls_count", 0),
+                    ep.get("revenue_usdc", 0.0),
+                    ep["created_at"],
+                ),
+            )
+
+        for vp in snapshot.get("vip_passes", []):
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO vip_passes
+                (tx_hash, payer_address, amount_usdc, calls_used, max_calls, expires_at, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?);
+                """,
+                (
+                    vp["tx_hash"],
+                    vp.get("payer_address", "unknown"),
+                    vp["amount_usdc"],
+                    vp.get("calls_used", 0),
+                    vp.get("max_calls", 1000),
+                    vp["expires_at"],
+                    vp["created_at"],
+                ),
+            )
+
+        cur_cnt = conn.execute(
+            "SELECT COUNT(*) as c FROM traffic_logs WHERE is_internal = 0;"
+        ).fetchone()["c"]
+        snap_traffic = snapshot.get("traffic_logs", [])
+        if cur_cnt < len(snap_traffic):
+            conn.execute("DELETE FROM traffic_logs;")
+            for tr in snap_traffic:
+                conn.execute(
+                    """
+                    INSERT INTO traffic_logs
+                    (path, method, status_code, category, agent_type, country, latency_ms, is_internal, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+                    """,
+                    (
+                        tr["path"],
+                        tr["method"],
+                        tr["status_code"],
+                        tr["category"],
+                        tr["agent_type"],
+                        tr.get("country", "GLOBAL"),
+                        tr.get("latency_ms", 0.0),
+                        tr.get("is_internal", 0),
+                        tr["created_at"],
+                    ),
+                )
+        conn.commit()
+    return get_stats(db_path)
+
+
 
 

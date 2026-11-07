@@ -22,16 +22,21 @@ from app.database import init_db, log_traffic_event
 from app.routers.api_v1 import router as api_v1_router
 from app.routers.dashboard import router as dashboard_router
 from app.routers.discovery import router as discovery_router
+from app.services.cloud_backup import push_to_cloud_gist, restore_from_cloud_gist
 from app.services.scout import run_autonomous_scout
 
 logger = logging.getLogger(__name__)
 
 
 async def _autopilot_scout_loop(db_path: str | None) -> None:
-    """Background loop that periodically runs the Autonomous Scout & Auto-Deployer."""
+    """Background loop that periodically runs the Autonomous Scout & Cloud Backup."""
+    if not settings.TESTING:
+        await restore_from_cloud_gist(db_path=db_path)
     while True:
         try:
             await run_autonomous_scout(db_path=db_path)
+            if not settings.TESTING:
+                await push_to_cloud_gist(db_path=db_path)
         except Exception as exc:
             logger.exception("Autonomous Scout background loop error: %s", exc)
         await asyncio.sleep(max(60, settings.SCOUT_INTERVAL_SECONDS))
