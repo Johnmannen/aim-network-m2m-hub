@@ -14,6 +14,7 @@ from typing import Optional
 from app.config import settings
 from app.database import get_stats, set_pause_state
 from app.services.market_data import (
+    fetch_base_dex_radar,
     fetch_crypto_pulse_data,
     fetch_deep_market_report,
     fetch_dynamic_asset_pulse,
@@ -66,6 +67,9 @@ async def preview_product_payload(
     if endpoint == "/api/v1/crypto-pulse":
         data = await fetch_crypto_pulse_data()
         return {"endpoint": endpoint, "price_usdc": settings.PRICE_MICRO_USDC, "product_payload": data}
+    if endpoint == "/api/v1/base-dex-radar":
+        data = await fetch_base_dex_radar()
+        return {"endpoint": endpoint, "price_usdc": settings.PRICE_DEX_RADAR_USDC, "product_payload": data}
     if endpoint == "/api/v1/deep-market-report":
         data = await fetch_deep_market_report()
         return {"endpoint": endpoint, "price_usdc": settings.PRICE_PREMIUM_USDC, "product_payload": data}
@@ -213,7 +217,7 @@ async def overseer_dashboard(request: Request) -> str:
         """
 
     dynamic_endpoints_html = ""
-    idx_ep = 3
+    idx_ep = 4
     for ep in stats.get("dynamic_endpoints", []):
         dynamic_endpoints_html += f"""
         <div class="endpoint-row">
@@ -498,7 +502,18 @@ async def overseer_dashboard(request: Request) -> str:
         </div>
         <div class="endpoint-row">
             <div>
-                <span class="endpoint-code">2. /api/v1/deep-market-report</span>
+                <span class="endpoint-code">2. /api/v1/base-dex-radar</span>
+                <span class="price-tag">$0.05 USDC</span>
+                <span class="badge-scout" style="background:#7c3aed;margin-left:6px;">BASE DEX WHALE RADAR</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                <span>Status: 🟢 Live (DexScreener Base)</span>
+                <button class="btn-preview" onclick="previewProduct('/api/v1/base-dex-radar')">👁️ Granska Data</button>
+            </div>
+        </div>
+        <div class="endpoint-row">
+            <div>
+                <span class="endpoint-code">3. /api/v1/deep-market-report</span>
                 <span class="price-tag">$1.00 USDC</span>
             </div>
             <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
@@ -528,8 +543,10 @@ async def overseer_dashboard(request: Request) -> str:
         </div>
         <div class="links-footer" style="margin-top: 16px;">
             <span>Maskin-kataloger för AI-botar:</span>
+            <a href="/api/v1/free-teaser" target="_blank">/api/v1/free-teaser (Gratis Smakprov)</a>
             <a href="/llms.txt" target="_blank">/llms.txt</a>
             <a href="/agents.json" target="_blank">/agents.json</a>
+            <a href="/mcp" target="_blank">/mcp (MCP Server)</a>
             <a href="/.well-known/agent.json" target="_blank">/.well-known/agent.json</a>
             <a href="/docs" target="_blank">/docs (OpenAPI)</a>
         </div>

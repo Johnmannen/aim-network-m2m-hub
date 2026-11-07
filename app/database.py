@@ -7,7 +7,7 @@ Handles persistent storage of:
 """
 
 import sqlite3
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -84,6 +84,20 @@ def init_db(db_path: Optional[str] = None) -> None:
             """
         )
 
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS vip_passes (
+                tx_hash TEXT PRIMARY KEY,
+                payer_address TEXT,
+                amount_usdc REAL NOT NULL,
+                calls_used INTEGER NOT NULL DEFAULT 0,
+                max_calls INTEGER NOT NULL DEFAULT 1000,
+                expires_at TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            """
+        )
+
         now = datetime.now(timezone.utc).isoformat()
         conn.execute(
             """
@@ -124,6 +138,9 @@ def get_stats(db_path: Optional[str] = None) -> Dict[str, Any]:
         dynamic_eps = conn.execute(
             "SELECT * FROM dynamic_endpoints ORDER BY created_at DESC LIMIT 12;"
         ).fetchall()
+        vip_rows = conn.execute(
+            "SELECT * FROM vip_passes ORDER BY created_at DESC LIMIT 10;"
+        ).fetchall()
         recent_txs = conn.execute(
             "SELECT * FROM used_transactions ORDER BY created_at DESC LIMIT 10;"
         ).fetchall()
@@ -137,6 +154,7 @@ def get_stats(db_path: Optional[str] = None) -> Dict[str, Any]:
             "updated_at": state_row["updated_at"],
             "discoveries": [dict(row) for row in discoveries],
             "dynamic_endpoints": [dict(row) for row in dynamic_eps],
+            "vip_passes": [dict(row) for row in vip_rows],
             "recent_transactions": [dict(row) for row in recent_txs],
         }
 
@@ -298,5 +316,101 @@ def increment_dynamic_endpoint_stats(
             (amount_usdc, slug.lower().strip()),
         )
         conn.commit()
+
+
+def check_and_use_vip_pass(
+    tx_hash: str, tier: str = "micro", db_path: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    """
+    If tx_hash is an active, non-expired 24h VIP pass with remaining calls,
+    increment its call usage and system call count without charging again.
+    """
+    init_db(db_path)
+    normalized = tx_hash.strip().lower()
+    now_dt = datetime.now(timezone.utc)
+    now_iso = now_dt.isoformat()
+
+    with get_connection(db_path) as conn:
+        row = conn.execute(
+            "SELECT * FROM vip_passes WHERE tx_hash = ?;", (normalized,)
+        ).fetchone()
+        if not row:
+            return None
+
+        expires_dt = datetime.fromisoformat(row["expires_at"])
+        if now_dt >= expires_dt or row["calls_used"] >= row["max_calls"]:
+            return None
+
+        conn.execute(
+            """
+            UPDATE vip_passes
+            SET calls_used = calls_used + 1
+            WHERE tx_hash = ?;
+            """,
+            (normalized,),
+        )
+        col = "calls_premium" if tier == "premium" else "calls_micro"
+        conn.execute(
+            f"UPDATE system_state SET {col} = {col} + 1, updated_at = ? WHERE id = 1;",
+            (now_iso,),
+        )
+        conn.commit()
+        updated = conn.execute(
+            "SELECT * FROM vip_passes WHERE tx_hash = ?;", (normalized,)
+        ).fetchone()
+        return dict(updated)
+
+
+def create_vip_pass(
+    tx_hash: str,
+    amount_usdc: float,
+    payer_address: str = "unknown",
+    tier: str = "premium",
+    verified_mode: str = "hybrid",
+    db_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Create a 24h VIP Pass (up to 1,000 calls across all endpoints) and record initial revenue.
+    """
+    init_db(db_path)
+    normalized = tx_hash.strip().lower()
+    now_dt = datetime.now(timezone.utc)
+    now_iso = now_dt.isoformat()
+    expires_iso = (
+        now_dt + timedelta(hours=settings.VIP_PASS_DURATION_HOURS)
+    ).isoformat()
+
+    record_paid_call(
+        tx_hash=normalized,
+        endpoint="/api/v1/vip-24h-pass",
+        amount_usdc=amount_usdc,
+        tier=tier,
+        payer_address=payer_address,
+        verified_mode=verified_mode,
+        db_path=db_path,
+    )
+
+    with get_connection(db_path) as conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO vip_passes
+            (tx_hash, payer_address, amount_usdc, calls_used, max_calls, expires_at, created_at)
+            VALUES (?, ?, ?, 1, ?, ?, ?);
+            """,
+            (
+                normalized,
+                payer_address,
+                amount_usdc,
+                settings.VIP_PASS_MAX_CALLS,
+                expires_iso,
+                now_iso,
+            ),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT * FROM vip_passes WHERE tx_hash = ?;", (normalized,)
+        ).fetchone()
+        return dict(row)
+
 
 

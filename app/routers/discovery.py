@@ -42,15 +42,25 @@ async def llms_txt_manifest(request: Request) -> str:
 - **Proof Header:** `X-PAYMENT-PROOF: <0x_base_transaction_hash>`
 
 ## Available M2M Endpoints
+0. `GET /api/v1/free-teaser`
+   - **Price:** `0.00 USDC (FREE)`
+   - **Description:** Instant live BTC spot & latency verification teaser for autonomous agents.
 1. `GET /api/v1/crypto-pulse`
    - **Price:** `{settings.PRICE_MICRO_USDC:.2f} USDC`
    - **Description:** Real-time BTC/ETH/SOL prices, 24h volatility index, and Fear & Greed sentiment JSON.
-2. `GET /api/v1/deep-market-report`
+2. `GET /api/v1/base-dex-radar`
+   - **Price:** `{settings.PRICE_DEX_RADAR_USDC:.2f} USDC`
+   - **Description:** Real-time Base L2 DEX liquidity pools, volume spikes, and whale inflow radar via DexScreener.
+3. `GET /api/v1/deep-market-report`
    - **Price:** `{settings.PRICE_PREMIUM_USDC:.2f} USDC`
    - **Description:** Institutional M2M quantitative market regime, Base L2 liquidity metrics, and actionable trading signals JSON.
 {dynamic_lines}
+## Volume Discount: 24-Hour VIP Pass (`{settings.PRICE_VIP_24H_USDC:.2f} USDC`)
+- Send `{settings.PRICE_VIP_24H_USDC:.2f} USDC` on Base to `{settings.WALLET_ADDRESS}` and reuse the same `X-PAYMENT-PROOF` transaction hash for up to **{settings.VIP_PASS_MAX_CALLS} calls across ALL endpoints for 24 hours**.
+
 ## Machine Catalogs
 - Agent Catalog: `/agents.json`
+- MCP Server Manifest & JSON-RPC: `/mcp`
 - A2A Agent Card: `/.well-known/agent.json`
 - OpenAPI Schema: `/openapi.json`
 """
@@ -102,6 +112,17 @@ async def agents_json_manifest(request: Request) -> dict:
 
     endpoints = [
         {
+            "id": "free-teaser",
+            "path": "/api/v1/free-teaser",
+            "method": "GET",
+            "tier": "free",
+            "price_usdc": 0.0,
+            "currency": "USDC",
+            "network": "base-mainnet",
+            "sla_target_ms": 100,
+            "description": "Free instant BTC spot & live feed verification teaser.",
+        },
+        {
             "id": "crypto-pulse",
             "path": "/api/v1/crypto-pulse",
             "method": "GET",
@@ -111,6 +132,17 @@ async def agents_json_manifest(request: Request) -> dict:
             "network": "base-mainnet",
             "sla_target_ms": 150,
             "description": "Real-time crypto market pulse, Fear & Greed sentiment, and 24h volatility index.",
+        },
+        {
+            "id": "base-dex-radar",
+            "path": "/api/v1/base-dex-radar",
+            "method": "GET",
+            "tier": "micro",
+            "price_usdc": settings.PRICE_DEX_RADAR_USDC,
+            "currency": "USDC",
+            "network": "base-mainnet",
+            "sla_target_ms": 150,
+            "description": "Real-time Base L2 DEX liquidity pools, volume spikes, and whale inflow radar.",
         },
         {
             "id": "deep-market-report",
@@ -179,3 +211,52 @@ async def trigger_autonomous_scout(request: Request) -> dict:
         "message": "Autonomous Scout discovered and auto-deployed a live M2M API endpoint.",
         "discovery": entry,
     }
+
+
+@router.api_route("/mcp", methods=["GET", "POST"], response_class=JSONResponse)
+async def mcp_server_endpoint(request: Request) -> dict:
+    """
+    Model Context Protocol (MCP) Discovery & Tool Definition Endpoint.
+    Allows MCP directories (Smithery, mcp.so, Glama) and LLM agents to inspect and invoke AIM Network tools.
+    """
+    tools = [
+        {
+            "name": "get_free_market_teaser",
+            "description": "Free instant verification of live BTC spot price and M2M feed status ($0.00 USDC).",
+            "endpoint": "https://johngarp.click/api/v1/free-teaser",
+            "price_usdc": 0.0,
+        },
+        {
+            "name": "get_crypto_pulse",
+            "description": "Real-time BTC, ETH, SOL prices, 24h volatility index, and Fear & Greed sentiment ($0.01 USDC via x402 on Base).",
+            "endpoint": "https://johngarp.click/api/v1/crypto-pulse",
+            "price_usdc": settings.PRICE_MICRO_USDC,
+        },
+        {
+            "name": "get_base_dex_radar",
+            "description": "Real-time Base L2 DEX liquidity pools, volume spikes, and whale inflow signals ($0.05 USDC via x402 on Base).",
+            "endpoint": "https://johngarp.click/api/v1/base-dex-radar",
+            "price_usdc": settings.PRICE_DEX_RADAR_USDC,
+        },
+        {
+            "name": "get_deep_market_report",
+            "description": "Institutional M2M quantitative market regime, Base L2 liquidity metrics, and actionable trading signals ($1.00 USDC via x402 on Base).",
+            "endpoint": "https://johngarp.click/api/v1/deep-market-report",
+            "price_usdc": settings.PRICE_PREMIUM_USDC,
+        },
+    ]
+    return {
+        "mcp_version": "2025-03-26",
+        "server_name": "aim-network-m2m-hub",
+        "canonical_url": "https://johngarp.click/mcp",
+        "payment_protocol": {
+            "type": "x402",
+            "network": "base-mainnet",
+            "chain_id": 8453,
+            "token": "USDC",
+            "recipient_wallet": settings.WALLET_ADDRESS,
+            "vip_24h_pass_usdc": settings.PRICE_VIP_24H_USDC,
+        },
+        "tools": tools,
+    }
+

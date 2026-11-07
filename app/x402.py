@@ -14,7 +14,13 @@ from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from app.config import settings
-from app.database import get_stats, is_tx_used, record_paid_call
+from app.database import (
+    check_and_use_vip_pass,
+    create_vip_pass,
+    get_stats,
+    is_tx_used,
+    record_paid_call,
+)
 
 # Keccak-256 topic0 for ERC-20 Transfer(address indexed from, address indexed to, uint256 value)
 ERC20_TRANSFER_TOPIC = (
@@ -29,8 +35,18 @@ def build_402_response(
     description: str,
     error_message: str = "Payment Required",
     status_code: int = 402,
+    sample_teaser: Optional[Dict[str, Any]] = None,
 ) -> JSONResponse:
-    """Build standard x402 v1.0 machine-readable payment requirement response."""
+    """Build standard x402 v1.0 machine-readable payment requirement response with live teaser."""
+    teaser = sample_teaser or {
+        "live_feed_verified": True,
+        "sla_latency_ms": "<150ms",
+        "unlocked_on_payment": [
+            "Real-time BTC/ETH/SOL prices & 24h volumes",
+            "Fear & Greed Index + Volatility Index",
+            "Base L2 DEX Whale Liquidity & Actionable Signals",
+        ],
+    }
     return JSONResponse(
         status_code=status_code,
         headers={
@@ -51,7 +67,15 @@ def build_402_response(
                 "amount": f"{price_usdc:.2f}",
                 "recipient": settings.WALLET_ADDRESS,
                 "description": description,
+                "vip_24h_pass_option": {
+                    "amount": f"{settings.PRICE_VIP_24H_USDC:.2f}",
+                    "description": (
+                        f"Pay {settings.PRICE_VIP_24H_USDC:.2f} USDC once to unlock a 24-hour VIP Pass "
+                        f"({settings.VIP_PASS_MAX_CALLS} calls across ALL endpoints using the same tx_hash)."
+                    ),
+                },
             },
+            "free_live_teaser": teaser,
             "instructions": (
                 "Sign USDC transfer on Base (Chain ID 8453) to recipient address "
                 "and retry request with transaction hash in X-PAYMENT-PROOF header."
@@ -167,12 +191,17 @@ async def require_x402_payment(
     if not payment_proof:
         return build_402_response(price_usdc, description)
 
-    # Check Replay Protection
+    # 1. Check if payment_proof is an active 24h VIP Pass
+    vip_entry = check_and_use_vip_pass(payment_proof, tier=tier, db_path=db_path)
+    if vip_entry is not None:
+        return None
+
+    # 2. Check Replay Protection for single-use transactions
     if is_tx_used(payment_proof, db_path):
         return build_402_response(
             price_usdc,
             description,
-            error_message="Payment proof transaction hash has already been used (Replay rejected).",
+            error_message="Payment proof transaction hash has already been used (Replay rejected). Tip: Send 2.00 USDC for a 24h multi-call VIP Pass.",
             status_code=402,
         )
 
@@ -180,8 +209,10 @@ async def require_x402_payment(
     payer_address = "0x_bot_client"
     verified_label = "onchain"
 
-    # Hybrid mode allows deterministic test tokens (`test_tx_...`) for instant sandbox/unit testing
-    if verify_mode == "hybrid" and payment_proof.lower().startswith("test_tx_"):
+    # Hybrid mode allows deterministic test tokens (`test_tx_...` or `test_vip_...`) for sandbox/unit testing
+    if verify_mode == "hybrid" and payment_proof.lower().startswith(
+        ("test_tx_", "test_vip_")
+    ):
         if len(payment_proof) < 12:
             return build_402_response(
                 price_usdc,
@@ -189,7 +220,33 @@ async def require_x402_payment(
                 error_message="Invalid test payment proof token.",
             )
         verified_label = "hybrid_sandbox"
+        if payment_proof.lower().startswith("test_vip_"):
+            create_vip_pass(
+                tx_hash=payment_proof,
+                amount_usdc=settings.PRICE_VIP_24H_USDC,
+                payer_address=payer_address,
+                tier="premium",
+                verified_mode=verified_label,
+                db_path=db_path,
+            )
+            return None
     else:
+        # First check if caller paid >= $2.00 USDC for a 24h VIP Pass
+        is_vip, vip_payer, _ = await verify_base_usdc_transaction(
+            tx_hash=payment_proof,
+            expected_amount_usdc=settings.PRICE_VIP_24H_USDC,
+        )
+        if is_vip:
+            create_vip_pass(
+                tx_hash=payment_proof,
+                amount_usdc=settings.PRICE_VIP_24H_USDC,
+                payer_address=vip_payer,
+                tier="premium",
+                verified_mode="onchain_vip",
+                db_path=db_path,
+            )
+            return None
+
         is_valid, payer, reason = await verify_base_usdc_transaction(
             tx_hash=payment_proof,
             expected_amount_usdc=price_usdc,

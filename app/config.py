@@ -45,7 +45,11 @@ class Settings:
     # Pricing tiers in USDC
     PRICE_MICRO_USDC: float = 0.01
     PRICE_DYNAMIC_USDC: float = 0.05
+    PRICE_DEX_RADAR_USDC: float = 0.05
     PRICE_PREMIUM_USDC: float = 1.00
+    PRICE_VIP_24H_USDC: float = 2.00
+    VIP_PASS_MAX_CALLS: int = 1000
+    VIP_PASS_DURATION_HOURS: int = 24
 
     # Autonomous Scout Auto-Pilot interval in seconds (default: every 3600s = 1 hour)
     SCOUT_INTERVAL_SECONDS: int = int(os.getenv("SCOUT_INTERVAL_SECONDS", "3600"))

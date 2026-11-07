@@ -136,3 +136,30 @@ def test_full_end_to_end_system(tmp_path: Path):
         assert r_dyn_paid.status_code == 200
         assert "asset" in r_dyn_paid.json()
 
+        # 8. Verify Free Teaser, Base DEX Radar, MCP endpoint & 24h VIP Pass
+        r_teaser = client.get("/api/v1/free-teaser")
+        assert r_teaser.status_code == 200
+        assert r_teaser.json()["status"] == "LIVE_FEED_VERIFIED"
+
+        r_mcp = client.get("/mcp")
+        assert r_mcp.status_code == 200
+        assert len(r_mcp.json()["tools"]) >= 4
+
+        # Base DEX Radar without proof -> 402 with free_live_teaser & vip_24h_pass_option
+        r_dex_402 = client.get("/api/v1/base-dex-radar")
+        assert r_dex_402.status_code == 402
+        assert "free_live_teaser" in r_dex_402.json()
+        assert "vip_24h_pass_option" in r_dex_402.json()["payment_details"]
+
+        # 24h VIP Pass (`test_vip_...`) allows multiple calls across all endpoints with same tx_hash!
+        vip_headers = {"X-PAYMENT-PROOF": "test_vip_pass_multi_use_001"}
+        r_vip_1 = client.get("/api/v1/base-dex-radar", headers=vip_headers)
+        assert r_vip_1.status_code == 200
+        assert "top_base_pools" in r_vip_1.json()
+
+        r_vip_2 = client.get("/api/v1/deep-market-report", headers=vip_headers)
+        assert r_vip_2.status_code == 200
+
+        r_vip_3 = client.get("/api/v1/crypto-pulse", headers=vip_headers)
+        assert r_vip_3.status_code == 200
+
