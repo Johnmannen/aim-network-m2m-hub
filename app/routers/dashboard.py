@@ -6,6 +6,8 @@ Uses Jinja2 autoescaped templates (XSS-safe), constant-time PIN comparison
 
 from collections import defaultdict
 from pathlib import Path
+import hashlib
+import hmac
 import secrets
 import time
 from typing import Optional
@@ -98,6 +100,75 @@ def verify_admin_pin_with_lockout(
     clear_pin_failures_db(client_ip, db_path=db_override)
 
 
+SESSION_COOKIE = "aim_admin"
+SESSION_MAX_AGE = 12 * 3600
+
+
+def _session_sig(ts: str) -> str:
+    return hmac.new(
+        settings.ADMIN_PIN.encode(), f"dashboard:{ts}".encode(), hashlib.sha256
+    ).hexdigest()
+
+
+def make_session_token() -> str:
+    ts = str(int(time.time()))
+    return f"{ts}.{_session_sig(ts)}"
+
+
+def has_valid_session(request: Request) -> bool:
+    """True if the request carries a valid, unexpired signed dashboard session cookie."""
+    token = request.cookies.get(SESSION_COOKIE, "")
+    ts, _, sig = token.partition(".")
+    if not ts.isdigit() or not sig:
+        return False
+    if time.time() - int(ts) > SESSION_MAX_AGE:
+        return False
+    return hmac.compare_digest(sig, _session_sig(ts))
+
+
+LOGIN_HTML = """<!doctype html><html lang="sv"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">
+<title>AIM Network</title>
+<style>body{font-family:system-ui;background:#0b1020;color:#e5e7eb;display:flex;min-height:100vh;align-items:center;justify-content:center;margin:0}
+.c{background:#111827;padding:32px;border-radius:12px;width:320px;text-align:center}
+input,button{width:100%;padding:10px;margin-top:12px;border-radius:8px;border:1px solid #374151;background:#0b1020;color:#e5e7eb;box-sizing:border-box}
+button{background:#16a34a;border:0;cursor:pointer}#e{color:#f87171;margin-top:8px;min-height:1em}</style></head>
+<body><div class="c"><h2>AIM Network</h2><p>Autonomous M2M API Hub &mdash; admin</p>
+<p><a style="color:#38bdf8" href="/llms.txt">/llms.txt</a> &middot; <a style="color:#38bdf8" href="/agents.json">/agents.json</a></p>
+<input id="p" type="password" placeholder="Admin PIN / Token" autocomplete="current-password">
+<button onclick="login()">Logga in</button><div id="e"></div></div>
+<script>async function login(){const r=await fetch("/api/admin/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({pin:document.getElementById("p").value})});
+if(r.ok){location.reload()}else{const d=await r.json();document.getElementById("e").textContent=d.detail||"Fel"}}
+document.getElementById("p").addEventListener("keydown",e=>{if(e.key==="Enter")login()})</script></body></html>"""
+
+
+class LoginRequest(BaseModel):
+    pin: Optional[str] = None
+
+
+@router.post("/api/admin/login", response_class=JSONResponse)
+async def admin_login(request: Request, payload: LoginRequest) -> JSONResponse:
+    """Exchange the admin PIN for a signed HttpOnly session cookie (lockout-protected)."""
+    verify_admin_pin_with_lockout(request, payload.pin)
+    resp = JSONResponse({"status": "ok"})
+    resp.set_cookie(
+        SESSION_COOKIE,
+        make_session_token(),
+        max_age=SESSION_MAX_AGE,
+        httponly=True,
+        secure=not settings.TESTING,
+        samesite="strict",
+    )
+    return resp
+
+
+@router.post("/api/admin/logout", response_class=JSONResponse)
+async def admin_logout() -> JSONResponse:
+    resp = JSONResponse({"status": "ok"})
+    resp.delete_cookie(SESSION_COOKIE)
+    return resp
+
+
 class PauseToggleRequest(BaseModel):
     pin: Optional[str] = None
     paused: Optional[bool] = None
@@ -114,7 +185,8 @@ async def admin_stats_endpoint(
     x_admin_pin: Optional[str] = Header(default=None, alias="X-Admin-Pin"),
 ) -> dict:
     """Return live stats, scout discoveries, traffic telemetry, and wallet info (PIN-protected)."""
-    verify_admin_pin_with_lockout(request, x_admin_pin)
+    if not has_valid_session(request):
+        verify_admin_pin_with_lockout(request, x_admin_pin)
     db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
     stats = get_stats(db_override)
     return {
@@ -248,7 +320,8 @@ async def run_agent_self_diagnosis(
     x_admin_pin: Optional[str] = Header(default=None, alias="X-Admin-Pin"),
 ) -> dict:
     """Run a live health check on all 4 autonomous subsystems/agents (PIN-protected)."""
-    verify_admin_pin_with_lockout(request, x_admin_pin)
+    if not has_valid_session(request):
+        verify_admin_pin_with_lockout(request, x_admin_pin)
     db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
     stats = get_stats(db_override)
     pulse = await fetch_crypto_pulse_data()
@@ -283,7 +356,9 @@ async def run_agent_self_diagnosis(
 
 @router.get("/", response_class=HTMLResponse)
 async def overseer_dashboard(request: Request) -> HTMLResponse:
-    """Render the responsive Overseer Dashboard using autoescaped Jinja2 template."""
+    """Render the Overseer Dashboard (admin session required; otherwise a minimal login page)."""
+    if not has_valid_session(request):
+        return HTMLResponse(content=LOGIN_HTML, headers={"Cache-Control": "no-store"})
     db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
     stats = get_stats(db_override)
 

@@ -50,6 +50,7 @@ def test_full_end_to_end_system(tmp_path: Path):
         assert len(r_agents.json()["endpoints"]) >= 4
 
         # 2. Dashboard initial render
+        client.post("/api/admin/login", json={"pin": settings.ADMIN_PIN})
         r_dash = client.get("/")
         assert r_dash.status_code == 200
         assert "AIM NETWORK — OVERSEER DASHBOARD" in r_dash.text

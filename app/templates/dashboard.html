@@ -444,20 +444,8 @@
             }
         }
 
-        function getAdminPin() {
-            let pin = sessionStorage.getItem("adminPin");
-            if (!pin) {
-                pin = prompt("Ange Admin PIN / Token:");
-                if (pin) sessionStorage.setItem("adminPin", pin);
-            }
-            return pin;
-        }
-
         async function adminFetch(url) {
-            const pin = getAdminPin();
-            if (!pin) return { error: "PIN saknas" };
-            const res = await fetch(url, { headers: { "X-Admin-Pin": pin } });
-            if (res.status === 401) sessionStorage.removeItem("adminPin");
+            const res = await fetch(url, { credentials: "same-origin" });
             return await res.json();
         }
 

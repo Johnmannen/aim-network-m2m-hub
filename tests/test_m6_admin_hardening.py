@@ -44,3 +44,30 @@ def test_keepalive_traffic_is_internal(tmp_path):
     db = str(tmp_path / "k.db")
     log_traffic_event("/llms.txt", "GET", 200, user_agent="aim-keepalive", db_path=db)
     assert get_stats(db)["traffic_telemetry"]["total_external_requests"] == 0
+
+
+def test_dashboard_locked_without_session(tmp_path):
+    c = _client(tmp_path)
+    r = c.get("/")
+    assert r.status_code == 200
+    assert "Logga in" in r.text
+    assert "USDC" not in r.text and "Intäkt" not in r.text
+
+
+def test_dashboard_login_flow(tmp_path):
+    c = _client(tmp_path)
+    assert c.post("/api/admin/login", json={"pin": "wrong"}).status_code == 401
+    assert c.get("/").text.count("Logga in") >= 1
+    ok = c.post("/api/admin/login", json={"pin": settings.ADMIN_PIN})
+    assert ok.status_code == 200
+    page = c.get("/")
+    assert "Logga in" not in page.text
+    # session cookie also unlocks admin JSON endpoints
+    assert c.get("/api/admin/stats").status_code == 200
+
+
+def test_forged_session_cookie_rejected(tmp_path):
+    c = _client(tmp_path)
+    c.cookies.set("aim_admin", "9999999999.deadbeef")
+    assert "Logga in" in c.get("/").text
+    assert c.get("/api/admin/stats").status_code == 401
