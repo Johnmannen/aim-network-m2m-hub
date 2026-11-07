@@ -5,11 +5,13 @@ with an in-memory 60-second TTL cache to guarantee < 0.15s M2M response time,
 plus deterministic fallback if external APIs are rate-limited or offline.
 """
 
+import logging
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 import httpx
 
+logger = logging.getLogger(__name__)
 CACHE_TTL_SECONDS = 60.0
 
 _cache_store: Dict[str, Dict[str, Any]] = {}
@@ -67,9 +69,8 @@ async def fetch_crypto_pulse_data() -> Dict[str, Any]:
                 if fng_data:
                     fng_value = int(fng_data[0].get("value", 72))
                     fng_classification = fng_data[0].get("value_classification", "Greed")
-    except Exception:
-        # Resilient fallback ensures <500ms uptime SLA for M2M bots even if upstream hiccups
-        pass
+    except Exception as exc:
+        logger.warning("Upstream market data fetch fallback triggered: %s", exc)
 
     btc_change = float(prices.get("bitcoin", {}).get("usd_24h_change", 0.0) or 0.0)
     eth_change = float(prices.get("ethereum", {}).get("usd_24h_change", 0.0) or 0.0)
@@ -235,8 +236,8 @@ async def fetch_dynamic_asset_pulse(
                     change_24h = round(float(data.get("usd_24h_change", 0.0) or 0.0), 2)
                     vol_24h = round(float(data.get("usd_24h_vol", 0.0) or 0.0), 2)
                     source_status = "coingecko_live"
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Dynamic asset pulse fallback triggered for %s: %s", slug, exc)
 
     result = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -338,8 +339,8 @@ async def fetch_base_dex_radar() -> Dict[str, Any]:
                         )
                     pools = live_pools
                     source_status = "dexscreener_base_live"
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Dynamic asset pulse fallback triggered for %s: %s", slug, exc)
 
     payload = {
         "timestamp": datetime.now(timezone.utc).isoformat(),

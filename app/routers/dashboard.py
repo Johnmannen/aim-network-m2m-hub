@@ -1,15 +1,18 @@
 """
 Overseer Dashboard (/) & PIN-Protected Admin Router.
-Provides:
-- GET / (Responsive dark Command Center UI for Mobile & Desktop)
-- GET /api/admin/stats (Live JSON metrics for Dashboard auto-refresh)
-- POST /api/admin/toggle-pause (PIN-protected Emergency Stop switch)
+Uses Jinja2 autoescaped templates (XSS-safe), constant-time PIN comparison
+(secrets.compare_digest), and brute-force lockout protection.
 """
 
+from collections import defaultdict
+from pathlib import Path
+import secrets
+import time
+from typing import Optional
 from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
+from jinja2 import Environment, FileSystemLoader, select_autoescape
 from pydantic import BaseModel
-from typing import Optional
 
 from app.config import settings
 from app.database import get_stats, set_pause_state
@@ -22,6 +25,45 @@ from app.services.market_data import (
 
 router = APIRouter(tags=["Overseer Dashboard & Admin"])
 
+TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
+_jinja_env = Environment(
+    loader=FileSystemLoader(str(TEMPLATES_DIR)),
+    autoescape=select_autoescape(["html", "xml"]),
+)
+
+# Brute-force tracking: ip -> list of failure timestamps
+_pin_failures: dict[str, list[float]] = defaultdict(list)
+
+
+def verify_admin_pin_with_lockout(request: Request, provided_pin: Optional[str]) -> None:
+    """
+    Verify admin PIN using constant-time secrets.compare_digest and enforce
+    brute-force lockout after MAX_PIN_FAILURES within PIN_LOCKOUT_SECONDS.
+    """
+    client_ip = request.client.host if request.client else "unknown"
+    now = time.monotonic()
+    recent_fails = [
+        t for t in _pin_failures[client_ip] if (now - t) < settings.PIN_LOCKOUT_SECONDS
+    ]
+    _pin_failures[client_ip] = recent_fails
+
+    if len(recent_fails) >= settings.MAX_PIN_FAILURES:
+        raise HTTPException(
+            status_code=429,
+            detail="För många felaktiga PIN-försök. Kontot är tillfälligt låst i 15 minuter.",
+        )
+
+    clean_pin = (provided_pin or "").strip()
+    if not clean_pin or not secrets.compare_digest(clean_pin, settings.ADMIN_PIN):
+        _pin_failures[client_ip].append(now)
+        raise HTTPException(
+            status_code=401,
+            detail="Ogiltig eller saknad Admin PIN-kod.",
+        )
+
+    # Clear failure counter on success
+    _pin_failures.pop(client_ip, None)
+
 
 class PauseToggleRequest(BaseModel):
     pin: Optional[str] = None
@@ -33,18 +75,56 @@ class ModeToggleRequest(BaseModel):
     mode: Optional[str] = None
 
 
+@router.get("/api/admin/stats", response_class=JSONResponse)
+async def admin_stats_endpoint(request: Request) -> dict:
+    """Return live stats, scout discoveries, traffic telemetry, and wallet info."""
+    db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
+    stats = get_stats(db_override)
+    return {
+        "wallet_address": settings.WALLET_ADDRESS,
+        "network": "base-mainnet",
+        "token": "USDC",
+        "verify_mode": settings.X402_VERIFY_MODE,
+        **stats,
+    }
+
+
+@router.post("/api/admin/toggle-pause", response_class=JSONResponse)
+async def toggle_emergency_stop(
+    request: Request,
+    payload: Optional[PauseToggleRequest] = None,
+    x_admin_pin: Optional[str] = Header(default=None, alias="X-Admin-Pin"),
+) -> dict:
+    """Toggle or set the Emergency Stop state (PIN-protected with brute-force lockout)."""
+    provided_pin = (payload.pin if payload and payload.pin else None) or x_admin_pin
+    verify_admin_pin_with_lockout(request, provided_pin)
+
+    db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
+    current = get_stats(db_override)
+    next_paused = (
+        payload.paused
+        if (payload is not None and payload.paused is not None)
+        else (not current["paused"])
+    )
+    updated = set_pause_state(next_paused, db_override)
+    return {
+        "status": "updated",
+        "paused": updated["paused"],
+        "system_status": updated["status"],
+        "stats": updated,
+    }
+
+
 @router.post("/api/admin/toggle-mode", response_class=JSONResponse)
 async def toggle_verify_mode(
+    request: Request,
     payload: Optional[ModeToggleRequest] = None,
     x_admin_pin: Optional[str] = Header(default=None, alias="X-Admin-Pin"),
 ) -> dict:
-    """Switch between 'hybrid' (sandbox + on-chain) and 'strict_onchain' (production only)."""
+    """Switch between 'hybrid' and 'strict_onchain' (PIN-protected with brute-force lockout)."""
     provided_pin = (payload.pin if payload and payload.pin else None) or x_admin_pin
-    if not provided_pin or provided_pin.strip() != settings.ADMIN_PIN:
-        raise HTTPException(
-            status_code=401,
-            detail="Ogiltig eller saknad Admin PIN-kod.",
-        )
+    verify_admin_pin_with_lockout(request, provided_pin)
+
     current = settings.X402_VERIFY_MODE.lower()
     next_mode = (
         payload.mode
@@ -60,10 +140,7 @@ async def preview_product_payload(
     request: Request,
     endpoint: str = "/api/v1/crypto-pulse",
 ) -> dict:
-    """
-    Allow John (from the Dashboard) to inspect the exact live JSON product
-    that a buying AI-bot receives after paying via x402.
-    """
+    """Inspect the exact live JSON product that a buying AI-bot receives."""
     if endpoint == "/api/v1/crypto-pulse":
         data = await fetch_crypto_pulse_data()
         return {"endpoint": endpoint, "price_usdc": settings.PRICE_MICRO_USDC, "product_payload": data}
@@ -100,7 +177,7 @@ async def run_agent_self_diagnosis(request: Request) -> dict:
     db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
     stats = get_stats(db_override)
     pulse = await fetch_crypto_pulse_data()
-    total_services = 2 + len(stats.get("dynamic_endpoints", []))
+    total_services = 3 + len(stats.get("dynamic_endpoints", []))
 
     return {
         "overall_status": "ALL_AGENTS_OPERATIONAL",
@@ -123,62 +200,15 @@ async def run_agent_self_diagnosis(request: Request) -> dict:
             {
                 "name": "4. Skyltfönster- & Marknadsförings-Agent (Discovery)",
                 "status": "ONLINE",
-                "detail": f"Exponerar {total_services} st säljbara API:er i /llms.txt, /agents.json & /sitemap.xml.",
+                "detail": f"Exponerar {total_services} st säljbara API:er i /llms.txt, /agents.json, /mcp & /sitemap.xml.",
             },
         ],
     }
 
 
-@router.get("/api/admin/stats", response_class=JSONResponse)
-async def admin_stats_endpoint(request: Request) -> dict:
-    """Return live stats, scout discoveries, and wallet info."""
-    db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
-    stats = get_stats(db_override)
-    return {
-        "wallet_address": settings.WALLET_ADDRESS,
-        "network": "base-mainnet",
-        "token": "USDC",
-        "verify_mode": settings.X402_VERIFY_MODE,
-        **stats,
-    }
-
-
-@router.post("/api/admin/toggle-pause", response_class=JSONResponse)
-async def toggle_emergency_stop(
-    request: Request,
-    payload: Optional[PauseToggleRequest] = None,
-    x_admin_pin: Optional[str] = Header(default=None, alias="X-Admin-Pin"),
-) -> dict:
-    """
-    Toggle or set the Emergency Stop state.
-    Protected by ADMIN_PIN (passed either via JSON body `pin` or `X-Admin-Pin` header).
-    """
-    provided_pin = (payload.pin if payload and payload.pin else None) or x_admin_pin
-    if not provided_pin or provided_pin.strip() != settings.ADMIN_PIN:
-        raise HTTPException(
-            status_code=401,
-            detail="Ogiltig eller saknad Admin PIN-kod för Nödstopp.",
-        )
-
-    db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
-    current = get_stats(db_override)
-    next_paused = (
-        payload.paused
-        if (payload is not None and payload.paused is not None)
-        else (not current["paused"])
-    )
-    updated = set_pause_state(next_paused, db_override)
-    return {
-        "status": "updated",
-        "paused": updated["paused"],
-        "system_status": updated["status"],
-        "stats": updated,
-    }
-
-
 @router.get("/", response_class=HTMLResponse)
-async def overseer_dashboard(request: Request) -> str:
-    """Render the responsive Overseer Dashboard (Mobile & Desktop)."""
+async def overseer_dashboard(request: Request) -> HTMLResponse:
+    """Render the responsive Overseer Dashboard using autoescaped Jinja2 template."""
     db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
     stats = get_stats(db_override)
 
@@ -202,59 +232,14 @@ async def overseer_dashboard(request: Request) -> str:
         else "🧪 HYBRID (Äkta Base-tx + Sandbox-test)"
     )
 
-    discoveries_html = ""
-    for d in stats["discoveries"]:
-        discoveries_html += f"""
-        <div class="log-item">
-            <div class="log-header">
-                <span class="badge-scout">{d['status']}</span>
-                <code class="endpoint-code">{d['suggested_endpoint']}</code>
-                <span class="price-tag">${d['suggested_price_usdc']:.2f} USDC</span>
-            </div>
-            <div class="log-title">{d['topic']}</div>
-            <div class="log-rationale">{d['rationale']}</div>
-        </div>
-        """
-
-    dynamic_endpoints_html = ""
-    idx_ep = 4
-    for ep in stats.get("dynamic_endpoints", []):
-        dynamic_endpoints_html += f"""
-        <div class="endpoint-row">
-            <div>
-                <span class="endpoint-code">{idx_ep}. {ep['endpoint_path']}</span>
-                <span class="price-tag">${ep['price_usdc']:.2f} USDC</span>
-                <span class="badge-scout" style="background:#059669;margin-left:6px;">AUTO-BYGGD ({ep['asset_symbol']})</span>
-            </div>
-            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-                <span>Anrop: <strong>{ep['calls_count']} st</strong> | Intäkt: <strong>${ep['revenue_usdc']:.2f} USDC</strong> | 🟢</span>
-                <button class="btn-preview" onclick="previewProduct('{ep['endpoint_path']}')">👁️ Granska Data</button>
-            </div>
-        </div>
-        """
-        idx_ep += 1
-
-    total_active_apis = 3 + len(stats.get("dynamic_endpoints", []))
     telemetry = stats.get("traffic_telemetry", {})
-    disc_hits = telemetry.get("discovery_hits", 0)
-    quotes_402 = telemetry.get("quotes_402", 0)
-    paid_200 = telemetry.get("paid_200", 0)
-    blocked_hits = telemetry.get("blocked_hits", 0)
-    conv_pct = telemetry.get("conversion_rate_pct", 0.0)
-    avg_lat = telemetry.get("avg_latency_ms", 0.0)
-    total_ext = telemetry.get("total_external_requests", 0)
-
-    agent_pills_html = ""
-    for ab in telemetry.get("agent_breakdown", []):
-        agent_pills_html += f"""
-        <span class="agent-pill">{ab['agent_type']}: <strong>{ab['cnt']}</strong></span>
-        """
-    if not agent_pills_html:
-        agent_pills_html = "<span class='agent-pill'>Väntar på första externa anropet...</span>"
-
-    stream_rows_html = ""
+    stream_events = []
     for ev in telemetry.get("recent_stream", [])[:12]:
-        ts_short = ev["created_at"][11:19] if len(ev.get("created_at", "")) >= 19 else ev.get("created_at", "")
+        ts_short = (
+            ev["created_at"][11:19]
+            if len(ev.get("created_at", "")) >= 19
+            else ev.get("created_at", "")
+        )
         cat = ev.get("category", "OTHER")
         if cat == "PAID_200":
             badge_cls = "b-paid"
@@ -272,525 +257,38 @@ async def overseer_dashboard(request: Request) -> str:
             badge_cls = "b-disc"
             badge_txt = f"⚪ {ev['status_code']}"
 
-        stream_rows_html += f"""
-        <tr>
-            <td style="font-family:monospace;color:var(--muted);">{ts_short}</td>
-            <td><span class="country-tag">{ev.get('country', 'GLOBAL')}</span></td>
-            <td>{ev.get('agent_type', '')}</td>
-            <td><code class="endpoint-code">{ev.get('method', 'GET')} {ev.get('path', '')}</code></td>
-            <td><span class="stream-badge {badge_cls}">{badge_txt}</span></td>
-            <td style="font-family:monospace;text-align:right;">{ev.get('latency_ms', 0.0):.1f} ms</td>
-        </tr>
-        """
-    if not stream_rows_html:
-        stream_rows_html = """
-        <tr>
-            <td colspan="6" style="text-align:center;color:var(--muted);padding:14px;">
-                Inga externa anrop loggade ännu — klicka på /llms.txt eller /api/v1/free-teaser för att se strömmen live!
-            </td>
-        </tr>
-        """
+        stream_events.append(
+            {
+                "ts_short": ts_short,
+                "country": ev.get("country", "GLOBAL"),
+                "agent_type": ev.get("agent_type", ""),
+                "method": ev.get("method", "GET"),
+                "path": ev.get("path", ""),
+                "badge_cls": badge_cls,
+                "badge_txt": badge_txt,
+                "latency_ms": float(ev.get("latency_ms", 0.0)),
+            }
+        )
 
-    return f"""<!DOCTYPE html>
-<html lang="sv">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AIM NETWORK — Overseer Dashboard</title>
-    <style>
-        :root {{
-            --bg: #0b0f17;
-            --card: #131b2e;
-            --border: #1e293b;
-            --neon: #4ade80;
-            --text: #f1f5f9;
-            --muted: #94a3b8;
-            --accent: #38bdf8;
-        }}
-        * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-        body {{
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
-            background-color: var(--bg);
-            color: var(--text);
-            padding: 20px;
-            max-width: 860px;
-            margin: 0 auto;
-            line-height: 1.5;
-        }}
-        .header-bar {{
-            background: linear-gradient(135deg, #131b2e 0%, #0f172a 100%);
-            border: 1px solid var(--border);
-            border-left: 4px solid {status_badge_color};
-            border-radius: 12px;
-            padding: 18px 20px;
-            margin-bottom: 18px;
-            display: flex;
-            flex-wrap: wrap;
-            justify-content: space-between;
-            align-items: center;
-            gap: 12px;
-        }}
-        .title-group h1 {{
-            font-size: 1.25rem;
-            letter-spacing: 0.5px;
-            color: #fff;
-        }}
-        .status-pill {{
-            font-weight: 700;
-            color: {status_badge_color};
-            font-size: 0.95rem;
-            margin-top: 4px;
-        }}
-        .wallet-box {{
-            background: rgba(56, 189, 248, 0.1);
-            border: 1px solid rgba(56, 189, 248, 0.3);
-            padding: 8px 12px;
-            border-radius: 8px;
-            font-family: monospace;
-            font-size: 0.85rem;
-            color: var(--accent);
-        }}
-        .grid-2 {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-            gap: 16px;
-            margin-bottom: 18px;
-        }}
-        .card {{
-            background: var(--card);
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 18px;
-            margin-bottom: 18px;
-        }}
-        .card h2 {{
-            font-size: 0.95rem;
-            text-transform: uppercase;
-            letter-spacing: 0.8px;
-            color: var(--muted);
-            margin-bottom: 12px;
-        }}
-        .revenue-big {{
-            font-size: 2.2rem;
-            font-weight: 800;
-            color: var(--neon);
-            font-family: monospace;
-        }}
-        .revenue-sub {{
-            font-size: 0.9rem;
-            color: var(--muted);
-            margin-top: 4px;
-        }}
-        .endpoint-row {{
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 12px;
-            background: rgba(255,255,255,0.03);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            margin-bottom: 10px;
-            flex-wrap: wrap;
-            gap: 8px;
-        }}
-        .endpoint-code {{
-            font-family: monospace;
-            color: var(--accent);
-            font-weight: 600;
-        }}
-        .price-tag {{
-            background: rgba(74, 222, 128, 0.15);
-            color: var(--neon);
-            padding: 2px 8px;
-            border-radius: 6px;
-            font-size: 0.8rem;
-            font-weight: 700;
-            font-family: monospace;
-        }}
-        .log-item {{
-            padding: 12px;
-            background: rgba(255,255,255,0.02);
-            border-left: 3px solid var(--accent);
-            border-radius: 6px;
-            margin-bottom: 10px;
-        }}
-        .log-header {{
-            display: flex;
-            gap: 8px;
-            align-items: center;
-            flex-wrap: wrap;
-            margin-bottom: 4px;
-        }}
-        .badge-scout {{
-            background: #3b82f6;
-            color: #fff;
-            font-size: 0.7rem;
-            font-weight: 700;
-            padding: 2px 6px;
-            border-radius: 4px;
-        }}
-        .log-title {{ font-weight: 600; font-size: 0.92rem; }}
-        .log-rationale {{ font-size: 0.83rem; color: var(--muted); margin-top: 2px; }}
-        .actions-bar {{
-            display: flex;
-            flex-wrap: wrap;
-            gap: 12px;
-            margin-top: 10px;
-        }}
-        button {{
-            cursor: pointer;
-            border: none;
-            border-radius: 8px;
-            padding: 12px 18px;
-            font-weight: 700;
-            font-size: 0.9rem;
-            color: #fff;
-            transition: opacity 0.15s;
-        }}
-        button:hover {{ opacity: 0.9; }}
-        .btn-stop {{ background: {btn_bg}; flex: 1; min-width: 220px; }}
-        .btn-scout {{ background: #2563eb; }}
-        .btn-refresh {{ background: #334155; }}
-        .btn-preview {{
-            background: rgba(56, 189, 248, 0.15);
-            border: 1px solid rgba(56, 189, 248, 0.4);
-            color: var(--accent);
-            padding: 5px 10px;
-            font-size: 0.78rem;
-            border-radius: 6px;
-        }}
-        .agent-grid {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-            gap: 10px;
-        }}
-        .agent-box {{
-            background: rgba(255,255,255,0.03);
-            border: 1px solid var(--border);
-            border-left: 3px solid var(--neon);
-            border-radius: 8px;
-            padding: 10px 12px;
-        }}
-        .agent-box h3 {{ font-size: 0.85rem; color: #fff; margin-bottom: 4px; }}
-        .agent-box p {{ font-size: 0.78rem; color: var(--muted); }}
-        .inspector-pre {{
-            background: #06090f;
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 14px;
-            color: #4ade80;
-            font-family: monospace;
-            font-size: 0.8rem;
-            overflow-x: auto;
-            max-height: 340px;
-            margin-top: 12px;
-            display: none;
-        }}
-        .funnel-grid {{
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
-            gap: 12px;
-            margin-bottom: 14px;
-        }}
-        .funnel-box {{
-            background: rgba(255,255,255,0.03);
-            border: 1px solid var(--border);
-            border-radius: 10px;
-            padding: 12px 14px;
-        }}
-        .funnel-num {{
-            font-size: 1.55rem;
-            font-weight: 800;
-            font-family: monospace;
-            margin-top: 2px;
-        }}
-        .funnel-label {{
-            font-size: 0.76rem;
-            color: var(--muted);
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
-        }}
-        .agent-pill {{
-            display: inline-block;
-            background: rgba(56, 189, 248, 0.1);
-            border: 1px solid rgba(56, 189, 248, 0.25);
-            color: var(--text);
-            padding: 4px 10px;
-            border-radius: 999px;
-            font-size: 0.78rem;
-            margin-right: 6px;
-            margin-bottom: 6px;
-        }}
-        .stream-table {{
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 0.8rem;
-            margin-top: 10px;
-        }}
-        .stream-table th {{
-            text-align: left;
-            color: var(--muted);
-            font-weight: 600;
-            padding: 8px 6px;
-            border-bottom: 1px solid var(--border);
-            font-size: 0.74rem;
-            text-transform: uppercase;
-        }}
-        .stream-table td {{
-            padding: 8px 6px;
-            border-bottom: 1px solid rgba(255,255,255,0.04);
-        }}
-        .stream-badge {{
-            padding: 2px 7px;
-            border-radius: 5px;
-            font-size: 0.72rem;
-            font-weight: 700;
-            font-family: monospace;
-        }}
-        .b-paid {{ background: rgba(74, 222, 128, 0.2); color: #4ade80; }}
-        .b-quote {{ background: rgba(250, 204, 21, 0.2); color: #facc15; }}
-        .b-disc {{ background: rgba(56, 189, 248, 0.18); color: #38bdf8; }}
-        .b-block {{ background: rgba(239, 68, 68, 0.2); color: #f87171; }}
-        .country-tag {{
-            background: rgba(255,255,255,0.07);
-            padding: 2px 6px;
-            border-radius: 4px;
-            font-family: monospace;
-            font-size: 0.74rem;
-        }}
-        .links-footer {{
-            display: flex;
-            gap: 16px;
-            flex-wrap: wrap;
-            font-size: 0.85rem;
-            color: var(--muted);
-            margin-top: 8px;
-        }}
-        .links-footer a {{ color: var(--accent); text-decoration: none; }}
-    </style>
-</head>
-<body>
-    <div class="header-bar">
-        <div class="title-group">
-            <h1>AIM NETWORK — OVERSEER DASHBOARD</h1>
-            <div class="status-pill" id="statusText">{status_dot}</div>
-        </div>
-        <div class="wallet-box" title="{wallet}">
-            Plånbok (Base USDC): <strong>{short_wallet}</strong> • Läge: <strong>{v_mode_label}</strong>
-        </div>
-    </div>
-
-    <div class="grid-2">
-        <div class="card" style="margin-bottom:0;">
-            <h2>💰 INTÄKTER (Base USDC Plånbok)</h2>
-            <div class="revenue-big" id="totalRevenue">${total_rev:.2f} USDC</div>
-            <div class="revenue-sub">≈ {total_sek:.2f} SEK • Direkt till {short_wallet}</div>
-        </div>
-        <div class="card" style="margin-bottom:0;">
-            <h2>⚡ ANROPSVOLYM (x402 M2M)</h2>
-            <div class="revenue-big" style="color:#38bdf8;" id="totalCalls">{stats['calls_micro'] + stats['calls_premium']} st</div>
-            <div class="revenue-sub">Mikro ($0.01): {stats['calls_micro']} st • Premium ($1.00): {stats['calls_premium']} st</div>
-        </div>
-    </div>
-
-    <div class="card">
-        <h2>📡 LIVE TRAFIK- & KONVERTERINGS-RADAR (Externa AI-Botar & Besökare)</h2>
-        <div class="funnel-grid">
-            <div class="funnel-box" style="border-left: 3px solid #38bdf8;">
-                <div class="funnel-label">🔍 1. Katalog & Meny-läsningar</div>
-                <div class="funnel-num" style="color:#38bdf8;">{disc_hits} st</div>
-                <div class="revenue-sub">/llms.txt, /agents.json, /mcp & teaser</div>
-            </div>
-            <div class="funnel-box" style="border-left: 3px solid #facc15;">
-                <div class="funnel-label">🚪 2. Prisförfrågningar (402)</div>
-                <div class="funnel-num" style="color:#facc15;">{quotes_402} st</div>
-                <div class="revenue-sub">Botar som fått x402-prisförslag</div>
-            </div>
-            <div class="funnel-box" style="border-left: 3px solid #4ade80;">
-                <div class="funnel-label">💰 3. Betalda Leveranser (200)</div>
-                <div class="funnel-num" style="color:#4ade80;">{paid_200} st ({conv_pct}%)</div>
-                <div class="revenue-sub">Konverteringsgrad (402 ➔ Köp)</div>
-            </div>
-            <div class="funnel-box" style="border-left: 3px solid #a855f7;">
-                <div class="funnel-label">⚡ 4. Snitt-Svarstid & Skydd</div>
-                <div class="funnel-num" style="color:#c084fc;">{avg_lat} ms</div>
-                <div class="revenue-sub">Totalt: {total_ext} anrop • Blockerade: {blocked_hits}</div>
-            </div>
-        </div>
-
-        <div style="margin-bottom: 10px;">
-            <div class="funnel-label" style="margin-bottom:6px;">🤖 Identifierade Besökare & Bot-Typer (User-Agent Detektor):</div>
-            {agent_pills_html}
-        </div>
-
-        <div style="overflow-x:auto;">
-            <table class="stream-table">
-                <thead>
-                    <tr>
-                        <th>Tid (UTC)</th>
-                        <th>Land</th>
-                        <th>Identifierad Agent / Besökare</th>
-                        <th>Anropad Endpoint</th>
-                        <th>Händelse / Status</th>
-                        <th style="text-align:right;">Svarstid</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {stream_rows_html}
-                </tbody>
-            </table>
-        </div>
-    </div>
-
-    <div class="card">
-        <h2>🤖 AGENT-BESÄTTNING (4 Autonoma Moduler i Drift)</h2>
-        <div class="agent-grid" id="agentCrewGrid">
-            <div class="agent-box">
-                <h3>🟢 1. Spanar- & Bygg-Agent</h3>
-                <p>Skannar trender varje timme och bygger nya API:er automatiskt ({len(stats.get('dynamic_endpoints', []))} st extra byggda).</p>
-            </div>
-            <div class="agent-box">
-                <h3>🟢 2. Data- & Analys-Agent</h3>
-                <p>Hämtar och beräknar live-priser, volatilitet och handels-signaler på under 0,15 sek.</p>
-            </div>
-            <div class="agent-box">
-                <h3>🟢 3. x402 Kassa- & Säkerhets-Agent</h3>
-                <p>Tar betalt i USDC på Base ({short_wallet}) och stoppar obetalda anrop (HTTP 402).</p>
-            </div>
-            <div class="agent-box">
-                <h3>🟢 4. Skyltfönster-Agent</h3>
-                <p>Marknadsför alla {total_active_apis} tjänster automatiskt i /llms.txt och /agents.json.</p>
-            </div>
-        </div>
-    </div>
-
-    <div class="card">
-        <h2>📊 AKTIVA TJÄNSTER (Klicka på "👁️ Granska Data" för att se exakt vad som byggts & säljs)</h2>
-        <div class="endpoint-row">
-            <div>
-                <span class="endpoint-code">1. /api/v1/crypto-pulse</span>
-                <span class="price-tag">$0.01 USDC</span>
-            </div>
-            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-                <span>Anrop: <strong>{stats['calls_micro']} st</strong> | Intäkt: <strong>${micro_rev:.2f} USDC</strong> | 🟢</span>
-                <button class="btn-preview" onclick="previewProduct('/api/v1/crypto-pulse')">👁️ Granska Data</button>
-            </div>
-        </div>
-        <div class="endpoint-row">
-            <div>
-                <span class="endpoint-code">2. /api/v1/base-dex-radar</span>
-                <span class="price-tag">$0.05 USDC</span>
-                <span class="badge-scout" style="background:#7c3aed;margin-left:6px;">BASE DEX WHALE RADAR</span>
-            </div>
-            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-                <span>Status: 🟢 Live (DexScreener Base)</span>
-                <button class="btn-preview" onclick="previewProduct('/api/v1/base-dex-radar')">👁️ Granska Data</button>
-            </div>
-        </div>
-        <div class="endpoint-row">
-            <div>
-                <span class="endpoint-code">3. /api/v1/deep-market-report</span>
-                <span class="price-tag">$1.00 USDC</span>
-            </div>
-            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-                <span>Anrop: <strong>{stats['calls_premium']} st</strong> | Intäkt: <strong>${prem_rev:.2f} USDC</strong> | 🟢</span>
-                <button class="btn-preview" onclick="previewProduct('/api/v1/deep-market-report')">👁️ Granska Data</button>
-            </div>
-        </div>
-        {dynamic_endpoints_html}
-        <pre id="productInspectorBox" class="inspector-pre"></pre>
-    </div>
-
-    <div class="card">
-        <h2>🔍 SPANAR-LOGG (Förslag från din Autonoma Spanar-agent)</h2>
-        <div id="discoveriesContainer">
-            {discoveries_html}
-        </div>
-    </div>
-
-    <div class="card">
-        <h2>🎛️ KOMMANDOCENTRAL (PIN-SKYDDAD)</h2>
-        <div class="actions-bar">
-            <button class="btn-stop" onclick="toggleEmergencyStop()">{btn_label}</button>
-            <button class="btn-scout" onclick="runSelfCheck()">🧪 Kör Själv-Diagnos</button>
-            <button class="btn-scout" onclick="toggleVerifyMode()">🔐 Växla On-Chain/Hybrid</button>
-            <button class="btn-scout" onclick="runScoutNow()">🔍 Kör Spanar-Agent Nu</button>
-            <button class="btn-refresh" onclick="window.location.reload()">🔄 Uppdatera Siffror</button>
-        </div>
-        <div class="links-footer" style="margin-top: 16px;">
-            <span>Maskin-kataloger för AI-botar:</span>
-            <a href="/api/v1/free-teaser" target="_blank">/api/v1/free-teaser (Gratis Smakprov)</a>
-            <a href="/llms.txt" target="_blank">/llms.txt</a>
-            <a href="/agents.json" target="_blank">/agents.json</a>
-            <a href="/mcp" target="_blank">/mcp (MCP Server)</a>
-            <a href="/.well-known/agent.json" target="_blank">/.well-known/agent.json</a>
-            <a href="/docs" target="_blank">/docs (OpenAPI)</a>
-        </div>
-    </div>
-
-    <script>
-        async function toggleEmergencyStop() {{
-            const pin = prompt("Ange Admin PIN-kod för att växla Nödstopp (Standard: 2026):");
-            if (!pin) return;
-            const res = await fetch("/api/admin/toggle-pause", {{
-                method: "POST",
-                headers: {{ "Content-Type": "application/json" }},
-                body: JSON.stringify({{ pin: pin }})
-            }});
-            if (res.ok) {{
-                window.location.reload();
-            }} else {{
-                const err = await res.json();
-                alert("Åtgärd nekad: " + (err.detail || "Fel PIN-kod"));
-            }}
-        }}
-
-        async function toggleVerifyMode() {{
-            const pin = prompt("Ange Admin PIN-kod för att växla mellan HYBRID och STRICT ON-CHAIN (Standard: 2026):");
-            if (!pin) return;
-            const res = await fetch("/api/admin/toggle-mode", {{
-                method: "POST",
-                headers: {{ "Content-Type": "application/json" }},
-                body: JSON.stringify({{ pin: pin }})
-            }});
-            if (res.ok) {{
-                window.location.reload();
-            }} else {{
-                const err = await res.json();
-                alert("Åtgärd nekad: " + (err.detail || "Fel PIN-kod"));
-            }}
-        }}
-
-        async function runScoutNow() {{
-            const res = await fetch("/cron/discover", {{ method: "POST" }});
-            if (res.ok) {{
-                window.location.reload();
-            }}
-        }}
-
-        async function previewProduct(endpointPath) {{
-            const box = document.getElementById("productInspectorBox");
-            box.style.display = "block";
-            box.textContent = "Hämtar live-produkt från " + endpointPath + " ...";
-            const res = await fetch("/api/admin/preview-product?endpoint=" + encodeURIComponent(endpointPath));
-            const data = await res.json();
-            box.textContent = "// LIVE PRODUKT-INSPEKTÖR FÖR: " + endpointPath + "\\n" + JSON.stringify(data, null, 2);
-        }}
-
-        async function runSelfCheck() {{
-            const box = document.getElementById("productInspectorBox");
-            box.style.display = "block";
-            box.textContent = "Kör själv-diagnos på alla 4 agenter...";
-            const res = await fetch("/api/admin/self-check");
-            const data = await res.json();
-            box.textContent = "// SJÄLV-DIAGNOS RESULTAT:\\n" + JSON.stringify(data, null, 2);
-        }}
-
-        // Auto-refresh Dashboard var 30:e sekund så nya intäkter och auto-byggda tjänster syns direkt
-        setInterval(() => {{
-            window.location.reload();
-        }}, 30000);
-    </script>
-</body>
-</html>"""
-
+    template = _jinja_env.get_template("dashboard.html")
+    html_content = template.render(
+        status_badge_color=status_badge_color,
+        status_dot=status_dot,
+        btn_label=btn_label,
+        btn_bg=btn_bg,
+        wallet=wallet,
+        short_wallet=short_wallet,
+        v_mode_label=v_mode_label,
+        total_rev=total_rev,
+        total_sek=total_sek,
+        micro_rev=micro_rev,
+        prem_rev=prem_rev,
+        price_micro=settings.PRICE_MICRO_USDC,
+        price_dex=settings.PRICE_DEX_RADAR_USDC,
+        price_premium=settings.PRICE_PREMIUM_USDC,
+        stats=stats,
+        telemetry=telemetry,
+        stream_events=stream_events,
+        total_active_apis=3 + len(stats.get("dynamic_endpoints", [])),
+    )
+    return HTMLResponse(content=html_content)

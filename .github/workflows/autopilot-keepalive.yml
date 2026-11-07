@@ -1,26 +1,47 @@
-name: AIM Network 24/7 Keep-Alive & Autonomous Scout Autopilot
+name: AIM Network CI Tests & 24/7 Keep-Alive
 
 on:
+  push:
+    branches: [ "master", "main" ]
   schedule:
-    # Körs var 14:e minut dygnet runt för att hålla Render Free Tier varm (<0.15s svarstid)
-    - cron: "*/14 * * * *"
+    # Körs var 10:e minut dygnet runt för att hålla Render Free Tier varm (<0.15s svarstid)
+    # Obs: Anropar ENDAST /health och lokala manifest så vi inte spammar CoinGecko API!
+    - cron: "*/10 * * * *"
   workflow_dispatch:
 
 jobs:
-  keepalive_and_scout:
+  ci_tests:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
-      - name: Ping Health & Warm Market Cache
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
         run: |
-          echo "Pinging AIM Network on johngarp.click & Render..."
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run full pytest suite
+        env:
+          TESTING: "true"
+          X402_VERIFY_MODE: "hybrid"
+          ADMIN_PIN: "ci_test_secret_pin_token"
+        run: |
+          pytest tests -v
+
+  keepalive_ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Health & Warm Discovery Manifests
+        run: |
+          echo "Pinging AIM Network on johngarp.click..."
           curl -fsS --max-time 25 "https://johngarp.click/health"
           echo ""
           curl -fsS --max-time 25 "https://johngarp.click/llms.txt" > /dev/null
           curl -fsS --max-time 25 "https://johngarp.click/agents.json" > /dev/null
-
-      - name: Trigger Autonomous Scout (/cron/discover)
-        run: |
-          echo "Triggering Autonomous Scout..."
-          curl -fsS -X POST --max-time 25 "https://johngarp.click/cron/discover"
-          echo ""
-

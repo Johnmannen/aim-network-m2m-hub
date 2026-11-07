@@ -2,12 +2,15 @@
 x402 Payment Protocol Middleware & On-Chain Base L2 USDC Verifier.
 Implements:
 - HTTP 402 Payment Required JSON response (x402 v1.0 specification)
-- Replay attack prevention via SQLite used_transactions table
+- Atomic Replay attack prevention via SQLite used_transactions PRIMARY KEY
 - Real on-chain verification against Base Mainnet RPC (ERC-20 Transfer log inspection for USDC)
-- Hybrid test mode support (allows simulated `test_tx_<unique>` proofs for local/CI verification)
+- Exact integer micro-USDC (6 decimals) math via Decimal (no float rounding bugs)
+- Shared httpx.AsyncClient reuse when available on app.state
 """
 
+import logging
 import re
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Dict, Optional, Tuple
 import httpx
 from fastapi import HTTPException, Request
@@ -18,26 +21,38 @@ from app.database import (
     check_and_use_vip_pass,
     create_vip_pass,
     get_stats,
-    is_tx_used,
     record_paid_call,
 )
+
+logger = logging.getLogger(__name__)
 
 # Keccak-256 topic0 for ERC-20 Transfer(address indexed from, address indexed to, uint256 value)
 ERC20_TRANSFER_TOPIC = (
     "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 )
 USDC_DECIMALS = 6
+MICRO_USDC_FACTOR = Decimal("1000000")
 TX_HASH_REGEX = re.compile(r"^0x[a-fA-F0-9]{64}$")
 
 
+def to_micro_usdc(amount_usdc: float | str | Decimal) -> int:
+    """Convert a USDC amount to exact integer micro-USDC units (10^6) using Decimal."""
+    dec_val = Decimal(str(amount_usdc))
+    return int(
+        (dec_val * MICRO_USDC_FACTOR).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    )
+
+
 def build_402_response(
-    price_usdc: float,
+    price_usdc: float | Decimal,
     description: str,
     error_message: str = "Payment Required",
     status_code: int = 402,
     sample_teaser: Optional[Dict[str, Any]] = None,
 ) -> JSONResponse:
     """Build standard x402 v1.0 machine-readable payment requirement response with live teaser."""
+    price_str = f"{Decimal(str(price_usdc)):.2f}"
+    vip_str = f"{settings.PRICE_VIP_24H_DEC:.2f}"
     teaser = sample_teaser or {
         "live_feed_verified": True,
         "sla_latency_ms": "<150ms",
@@ -53,7 +68,7 @@ def build_402_response(
             "X-Payment-Version": "x402/1.0",
             "X-Payment-Network": "base-mainnet",
             "X-Payment-Token": "USDC",
-            "X-Payment-Amount": f"{price_usdc:.2f}",
+            "X-Payment-Amount": price_str,
             "X-Payment-Recipient": settings.WALLET_ADDRESS,
         },
         content={
@@ -61,16 +76,16 @@ def build_402_response(
             "x402_version": "1.0",
             "payment_details": {
                 "network": "base-mainnet",
-                "chain_id": 8453,
+                "chain_id": settings.BASE_CHAIN_ID,
                 "token": "USDC",
                 "token_contract": settings.USDC_CONTRACT_ADDRESS,
-                "amount": f"{price_usdc:.2f}",
+                "amount": price_str,
                 "recipient": settings.WALLET_ADDRESS,
                 "description": description,
                 "vip_24h_pass_option": {
-                    "amount": f"{settings.PRICE_VIP_24H_USDC:.2f}",
+                    "amount": vip_str,
                     "description": (
-                        f"Pay {settings.PRICE_VIP_24H_USDC:.2f} USDC once to unlock a 24-hour VIP Pass "
+                        f"Pay {vip_str} USDC once to unlock a 24-hour VIP Pass "
                         f"({settings.VIP_PASS_MAX_CALLS} calls across ALL endpoints using the same tx_hash)."
                     ),
                 },
@@ -86,15 +101,16 @@ def build_402_response(
 
 async def verify_base_usdc_transaction(
     tx_hash: str,
-    expected_amount_usdc: float,
+    expected_amount_usdc: float | Decimal,
     recipient_wallet: Optional[str] = None,
     rpc_url: Optional[str] = None,
+    http_client: Optional[httpx.AsyncClient] = None,
 ) -> Tuple[bool, str, str]:
     """
     Verify an on-chain Base Mainnet transaction receipt via JSON-RPC:
     1. Confirms transaction status == 0x1 (succeeded)
     2. Inspects ERC-20 Transfer logs from the official Base USDC contract
-    3. Confirms recipient matches John's wallet and transferred amount >= expected_amount_usdc
+    3. Confirms recipient matches configured wallet and transferred micro-USDC >= expected_units
 
     Returns:
         (is_valid, payer_address, reason)
@@ -104,7 +120,11 @@ async def verify_base_usdc_transaction(
     endpoint_rpc = rpc_url or settings.BASE_RPC_URL
 
     if not TX_HASH_REGEX.match(tx_hash.strip()):
-        return False, "", "Invalid transaction hash format (expected 0x + 64 hex chars)."
+        return (
+            False,
+            "",
+            "Invalid transaction hash format (expected 0x + 64 hex chars).",
+        )
 
     payload = {
         "jsonrpc": "2.0",
@@ -118,16 +138,23 @@ async def verify_base_usdc_transaction(
     ]
     data = None
     last_err = None
+
     for candidate_url in rpc_candidates:
         try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                resp = await client.post(candidate_url, json=payload)
+            if http_client is not None:
+                resp = await http_client.post(candidate_url, json=payload, timeout=5.0)
                 resp.raise_for_status()
                 data = resp.json()
-                if data and "result" in data:
-                    break
+            else:
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    resp = await client.post(candidate_url, json=payload)
+                    resp.raise_for_status()
+                    data = resp.json()
+            if data and "result" in data:
+                break
         except Exception as exc:
             last_err = exc
+            logger.warning("Base RPC candidate %s failed: %s", candidate_url, exc)
             continue
 
     if data is None:
@@ -140,7 +167,7 @@ async def verify_base_usdc_transaction(
     if receipt.get("status") != "0x1":
         return False, "", "Transaction failed or reverted on-chain."
 
-    expected_units = int(round(expected_amount_usdc * (10**USDC_DECIMALS)))
+    expected_units = to_micro_usdc(expected_amount_usdc)
     padded_recipient = "0x" + target_wallet.replace("0x", "").rjust(64, "0")
 
     for log in receipt.get("logs", []):
@@ -165,20 +192,21 @@ async def verify_base_usdc_transaction(
     )
 
 
+def _is_test_token_allowed() -> bool:
+    """Simulated test_tx_ / test_vip_ proofs are allowed ONLY in explicit test/sandbox mode."""
+    return settings.TESTING or settings.X402_VERIFY_MODE.lower() == "hybrid"
+
+
 async def require_x402_payment(
     request: Request,
-    price_usdc: float,
+    price_usdc: float | Decimal,
     description: str,
     tier: str = "micro",
     db_path: Optional[str] = None,
 ) -> Optional[JSONResponse]:
     """
     Validate x402 payment on incoming M2M API request.
-    - If system is paused (Emergency Stop), raises HTTP 503.
-    - If X-PAYMENT-PROOF header is missing, returns HTTP 402 JSONResponse.
-    - If X-PAYMENT-PROOF was already used (Replay attack), returns HTTP 402/409 JSONResponse.
-    - Verifies proof (hybrid simulated proof or live Base RPC receipt) and records revenue.
-    - Returns None when payment is valid and recorded.
+    Uses atomic INSERT in SQLite to prevent TOCTOU race condition replay attacks.
     """
     stats = get_stats(db_path)
     if stats["paused"]:
@@ -196,21 +224,12 @@ async def require_x402_payment(
     if vip_entry is not None:
         return None
 
-    # 2. Check Replay Protection for single-use transactions
-    if is_tx_used(payment_proof, db_path):
-        return build_402_response(
-            price_usdc,
-            description,
-            error_message="Payment proof transaction hash has already been used (Replay rejected). Tip: Send 2.00 USDC for a 24h multi-call VIP Pass.",
-            status_code=402,
-        )
-
-    verify_mode = settings.X402_VERIFY_MODE.lower()
     payer_address = "0x_bot_client"
     verified_label = "onchain"
+    shared_client = getattr(request.app.state, "http_client", None)
 
-    # Hybrid mode allows deterministic test tokens (`test_tx_...` or `test_vip_...`) for sandbox/unit testing
-    if verify_mode == "hybrid" and payment_proof.lower().startswith(
+    # 2. Verify proof (sandbox test token if allowed, otherwise strict Base RPC verification)
+    if _is_test_token_allowed() and payment_proof.lower().startswith(
         ("test_tx_", "test_vip_")
     ):
         if len(payment_proof) < 12:
@@ -221,35 +240,51 @@ async def require_x402_payment(
             )
         verified_label = "hybrid_sandbox"
         if payment_proof.lower().startswith("test_vip_"):
-            create_vip_pass(
-                tx_hash=payment_proof,
-                amount_usdc=settings.PRICE_VIP_24H_USDC,
-                payer_address=payer_address,
-                tier="premium",
-                verified_mode=verified_label,
-                db_path=db_path,
-            )
-            return None
+            try:
+                create_vip_pass(
+                    tx_hash=payment_proof,
+                    amount_usdc=float(settings.PRICE_VIP_24H_DEC),
+                    payer_address=payer_address,
+                    tier="premium",
+                    verified_mode=verified_label,
+                    db_path=db_path,
+                )
+                return None
+            except ValueError:
+                return build_402_response(
+                    price_usdc,
+                    description,
+                    error_message="VIP pass expired or call quota exhausted.",
+                )
     else:
-        # First check if caller paid >= $2.00 USDC for a 24h VIP Pass
+        # Check if caller paid >= $2.00 USDC for a new 24h VIP Pass
         is_vip, vip_payer, _ = await verify_base_usdc_transaction(
             tx_hash=payment_proof,
-            expected_amount_usdc=settings.PRICE_VIP_24H_USDC,
+            expected_amount_usdc=settings.PRICE_VIP_24H_DEC,
+            http_client=shared_client,
         )
         if is_vip:
-            create_vip_pass(
-                tx_hash=payment_proof,
-                amount_usdc=settings.PRICE_VIP_24H_USDC,
-                payer_address=vip_payer,
-                tier="premium",
-                verified_mode="onchain_vip",
-                db_path=db_path,
-            )
-            return None
+            try:
+                create_vip_pass(
+                    tx_hash=payment_proof,
+                    amount_usdc=float(settings.PRICE_VIP_24H_DEC),
+                    payer_address=vip_payer,
+                    tier="premium",
+                    verified_mode="onchain_vip",
+                    db_path=db_path,
+                )
+                return None
+            except ValueError:
+                return build_402_response(
+                    price_usdc,
+                    description,
+                    error_message="VIP pass expired or call quota exhausted.",
+                )
 
         is_valid, payer, reason = await verify_base_usdc_transaction(
             tx_hash=payment_proof,
             expected_amount_usdc=price_usdc,
+            http_client=shared_client,
         )
         if not is_valid:
             return build_402_response(
@@ -259,15 +294,23 @@ async def require_x402_payment(
             )
         payer_address = payer
 
-    # Record valid payment & increment stats
-    record_paid_call(
-        tx_hash=payment_proof,
-        endpoint=request.url.path,
-        amount_usdc=price_usdc,
-        tier=tier,
-        payer_address=payer_address,
-        verified_mode=verified_label,
-        db_path=db_path,
-    )
-    return None
+    # 3. Atomically record single-use transaction (raises ValueError on concurrent replay)
+    try:
+        record_paid_call(
+            tx_hash=payment_proof,
+            endpoint=request.url.path,
+            amount_usdc=float(Decimal(str(price_usdc))),
+            tier=tier,
+            payer_address=payer_address,
+            verified_mode=verified_label,
+            db_path=db_path,
+        )
+    except ValueError:
+        return build_402_response(
+            price_usdc,
+            description,
+            error_message="Payment proof transaction hash has already been used (Replay rejected). Tip: Send 2.00 USDC for a 24h multi-call VIP Pass.",
+            status_code=402,
+        )
 
+    return None

@@ -6,7 +6,9 @@ Self-Marketing & AI Agent Discovery Router:
 - GET/POST /cron/discover (Autonomous Scout trigger)
 """
 
-from fastapi import APIRouter, Request
+import secrets
+from typing import Optional
+from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from app.config import settings
@@ -202,8 +204,29 @@ async def well_known_agent_card(request: Request) -> dict:
 
 
 @router.api_route("/cron/discover", methods=["GET", "POST"], response_class=JSONResponse)
-async def trigger_autonomous_scout(request: Request) -> dict:
-    """Run the Autonomous Scout to discover AND auto-deploy a new M2M API endpoint."""
+async def trigger_autonomous_scout(
+    request: Request,
+    x_admin_pin: Optional[str] = Header(default=None, alias="X-Admin-Pin"),
+    x_scout_token: Optional[str] = Header(default=None, alias="X-Scout-Token"),
+) -> dict:
+    """
+    Run the Autonomous Scout to discover AND auto-deploy a new M2M API endpoint.
+    Requires X-Admin-Pin or X-Scout-Token in production (bypassed only in TESTING mode if no header sent).
+    """
+    provided = (x_scout_token or x_admin_pin or "").strip()
+    if not settings.TESTING or provided:
+        valid_admin = bool(
+            provided and secrets.compare_digest(provided, settings.ADMIN_PIN)
+        )
+        valid_scout = bool(
+            provided and secrets.compare_digest(provided, settings.SCOUT_SECRET_TOKEN)
+        )
+        if not (valid_admin or valid_scout):
+            raise HTTPException(
+                status_code=401,
+                detail="Unauthorized: Valid X-Scout-Token or X-Admin-Pin header required.",
+            )
+
     db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
     entry = await run_autonomous_scout(db_path=db_override)
     return {

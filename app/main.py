@@ -1,19 +1,21 @@
 """
-AIM Network — Autonomous M2M API Hub (Main FastAPI Application).
+AIM Network - Autonomous M2M API Hub (Main FastAPI Application).
 Combines:
 - Overseer Dashboard (/) & PIN-protected Emergency Stop (/api/admin/toggle-pause)
-- Self-marketing AI discovery manifests (/llms.txt, /agents.json, /.well-known/agent.json)
+- Self-marketing AI discovery manifests (/llms.txt, /agents.json, /.well-known/agent.json, /mcp)
 - Autonomous Scout (/cron/discover)
-- x402-protected M2M Data Endpoints (/api/v1/crypto-pulse & /api/v1/deep-market-report)
+- x402-protected M2M Data Endpoints (/api/v1/crypto-pulse, /api/v1/base-dex-radar, /api/v1/deep-market-report)
 """
 
 import asyncio
-from contextlib import asynccontextmanager
-import time
 from collections import defaultdict
+from contextlib import asynccontextmanager
+import logging
+import time
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+import httpx
 
 from app.config import settings
 from app.database import init_db, log_traffic_event
@@ -22,14 +24,16 @@ from app.routers.dashboard import router as dashboard_router
 from app.routers.discovery import router as discovery_router
 from app.services.scout import run_autonomous_scout
 
+logger = logging.getLogger(__name__)
+
 
 async def _autopilot_scout_loop(db_path: str | None) -> None:
     """Background loop that periodically runs the Autonomous Scout & Auto-Deployer."""
     while True:
         try:
             await run_autonomous_scout(db_path=db_path)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.exception("Autonomous Scout background loop error: %s", exc)
         await asyncio.sleep(max(60, settings.SCOUT_INTERVAL_SECONDS))
 
 
@@ -37,6 +41,7 @@ async def _autopilot_scout_loop(db_path: str | None) -> None:
 async def lifespan(app: FastAPI):
     db_override = getattr(app.state, "db_path", None)
     init_db(db_override)
+    app.state.http_client = httpx.AsyncClient(timeout=5.0)
     scout_task = None
     if settings.SCOUT_AUTOPILOT_ENABLED:
         scout_task = asyncio.create_task(_autopilot_scout_loop(db_override))
@@ -45,6 +50,22 @@ async def lifespan(app: FastAPI):
     finally:
         if scout_task:
             scout_task.cancel()
+        await app.state.http_client.aclose()
+
+
+def _resolve_client_ip(request: Request) -> str:
+    """
+    Resolve client IP safely. Only trust CF-Connecting-IP / X-Forwarded-For
+    when TRUST_PROXY_HEADERS=true (e.g., behind Cloudflare/Render proxy).
+    """
+    if settings.TRUST_PROXY_HEADERS:
+        cf_ip = request.headers.get("CF-Connecting-IP", "").strip()
+        if cf_ip:
+            return cf_ip
+        xff = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+        if xff:
+            return xff
+    return request.client.host if request.client else "unknown"
 
 
 def create_app(db_path: str | None = None) -> FastAPI:
@@ -60,22 +81,30 @@ def create_app(db_path: str | None = None) -> FastAPI:
     if db_path:
         app.state.db_path = db_path
 
-    # In-memory sliding window rate limiter (Cloudflare CF-Connecting-IP aware)
+    # Bounded sliding-window rate limiter (prevents memory leaks via periodic pruning)
     ip_hits: dict[str, list[float]] = defaultdict(list)
+    last_prune_ts: list[float] = [time.monotonic()]
 
     @app.middleware("http")
     async def security_and_rate_limit_middleware(request: Request, call_next):
         t0 = time.perf_counter()
-        client_ip = (
-            request.headers.get("CF-Connecting-IP")
-            or request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-            or (request.client.host if request.client else "unknown")
-        )
+        client_ip = _resolve_client_ip(request)
         country = request.headers.get("CF-IPCountry", "GLOBAL")
         user_agent = request.headers.get("User-Agent", "")
         db_override = getattr(request.app.state, "db_path", None)
 
         now = time.monotonic()
+        # Prune stale IP keys every 120 seconds or if map exceeds 2,000 keys
+        if (now - last_prune_ts[0]) > 120.0 or len(ip_hits) > 2000:
+            stale_ips = [
+                ip
+                for ip, timestamps in ip_hits.items()
+                if not timestamps or (now - timestamps[-1]) >= 60.0
+            ]
+            for ip in stale_ips:
+                ip_hits.pop(ip, None)
+            last_prune_ts[0] = now
+
         window = [t for t in ip_hits[client_ip] if (now - t) < 60.0]
         if len(window) >= settings.RATE_LIMIT_PER_MINUTE:
             elapsed_ms = (time.perf_counter() - t0) * 1000.0
@@ -89,8 +118,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
                     latency_ms=elapsed_ms,
                     db_path=db_override,
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("Traffic logging failed on 429: %s", exc)
             return JSONResponse(
                 status_code=429,
                 content={
@@ -113,8 +142,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 latency_ms=elapsed_ms,
                 db_path=db_override,
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Traffic logging failed: %s", exc)
 
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "SAMEORIGIN"
@@ -123,8 +152,8 @@ def create_app(db_path: str | None = None) -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Content-Type", "X-PAYMENT-PROOF", "X-Admin-Pin", "X-Scout-Token"],
     )
 
     app.include_router(dashboard_router)

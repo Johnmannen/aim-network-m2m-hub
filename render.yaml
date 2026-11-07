@@ -9,13 +9,18 @@ services:
       - key: WALLET_ADDRESS
         value: "0x1bbae07abebbb61f611391e02e81ee26b0c47b79"
       - key: ADMIN_PIN
-        value: "2026"
+        generateValue: true
+      - key: SCOUT_SECRET_TOKEN
+        generateValue: true
       - key: X402_VERIFY_MODE
         value: "strict_onchain"
+      - key: TESTING
+        value: "false"
+      - key: TRUST_PROXY_HEADERS
+        value: "true"
       - key: SCOUT_AUTOPILOT_ENABLED
         value: "true"
       - key: SCOUT_INTERVAL_SECONDS
         value: "3600"
       - key: BASE_RPC_URL
         value: "https://mainnet.base.org"
-

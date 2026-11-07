@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AIM NETWORK — Overseer Dashboard</title>
+    <style>
+        :root {
+            --bg: #0b0f17;
+            --card: #131b2e;
+            --border: #1e293b;
+            --neon: #4ade80;
+            --text: #f1f5f9;
+            --muted: #94a3b8;
+            --accent: #38bdf8;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
+            background-color: var(--bg);
+            color: var(--text);
+            padding: 20px;
+            max-width: 860px;
+            margin: 0 auto;
+            line-height: 1.5;
+        }
+        .header-bar {
+            background: linear-gradient(135deg, #131b2e 0%, #0f172a 100%);
+            border: 1px solid var(--border);
+            border-left: 4px solid {{ status_badge_color }};
+            border-radius: 12px;
+            padding: 18px 20px;
+            margin-bottom: 18px;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+        }
+        .title-group h1 { font-size: 1.25rem; letter-spacing: 0.5px; color: #fff; }
+        .status-pill { font-weight: 700; color: {{ status_badge_color }}; font-size: 0.95rem; margin-top: 4px; }
+        .wallet-box {
+            background: rgba(56, 189, 248, 0.1);
+            border: 1px solid rgba(56, 189, 248, 0.3);
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-family: monospace;
+            font-size: 0.85rem;
+            color: var(--accent);
+        }
+        .grid-2 {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 16px;
+            margin-bottom: 18px;
+        }
+        .card {
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 18px;
+            margin-bottom: 18px;
+        }
+        .card h2 {
+            font-size: 0.95rem;
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            color: var(--muted);
+            margin-bottom: 12px;
+        }
+        .revenue-big { font-size: 2.2rem; font-weight: 800; color: var(--neon); font-family: monospace; }
+        .revenue-sub { font-size: 0.9rem; color: var(--muted); margin-top: 4px; }
+        .endpoint-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px;
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .endpoint-code { font-family: monospace; color: var(--accent); font-weight: 600; }
+        .price-tag {
+            background: rgba(74, 222, 128, 0.15);
+            color: var(--neon);
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            font-family: monospace;
+        }
+        .log-item {
+            padding: 12px;
+            background: rgba(255,255,255,0.02);
+            border-left: 3px solid var(--accent);
+            border-radius: 6px;
+            margin-bottom: 10px;
+        }
+        .log-header { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 4px; }
+        .badge-scout {
+            background: #3b82f6;
+            color: #fff;
+            font-size: 0.7rem;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+        .log-title { font-weight: 600; font-size: 0.92rem; }
+        .log-rationale { font-size: 0.83rem; color: var(--muted); margin-top: 2px; }
+        .actions-bar { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; }
+        button {
+            cursor: pointer;
+            border: none;
+            border-radius: 8px;
+            padding: 12px 18px;
+            font-weight: 700;
+            font-size: 0.9rem;
+            color: #fff;
+            transition: opacity 0.15s;
+        }
+        button:hover { opacity: 0.9; }
+        .btn-stop { background: {{ btn_bg }}; flex: 1; min-width: 220px; }
+        .btn-scout { background: #2563eb; }
+        .btn-refresh { background: #334155; }
+        .btn-preview {
+            background: rgba(56, 189, 248, 0.15);
+            border: 1px solid rgba(56, 189, 248, 0.4);
+            color: var(--accent);
+            padding: 5px 10px;
+            font-size: 0.78rem;
+            border-radius: 6px;
+        }
+        .agent-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+        .agent-box {
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+            border-left: 3px solid var(--neon);
+            border-radius: 8px;
+            padding: 10px 12px;
+        }
+        .agent-box h3 { font-size: 0.85rem; color: #fff; margin-bottom: 4px; }
+        .agent-box p { font-size: 0.78rem; color: var(--muted); }
+        .inspector-pre {
+            background: #06090f;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 14px;
+            color: #4ade80;
+            font-family: monospace;
+            font-size: 0.8rem;
+            overflow-x: auto;
+            max-height: 340px;
+            margin-top: 12px;
+            display: none;
+        }
+        .funnel-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(175px, 1fr)); gap: 12px; margin-bottom: 14px; }
+        .funnel-box { background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
+        .funnel-num { font-size: 1.55rem; font-weight: 800; font-family: monospace; margin-top: 2px; }
+        .funnel-label { font-size: 0.76rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+        .agent-pill {
+            display: inline-block;
+            background: rgba(56, 189, 248, 0.1);
+            border: 1px solid rgba(56, 189, 248, 0.25);
+            color: var(--text);
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 0.78rem;
+            margin-right: 6px;
+            margin-bottom: 6px;
+        }
+        .stream-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; margin-top: 10px; }
+        .stream-table th {
+            text-align: left;
+            color: var(--muted);
+            font-weight: 600;
+            padding: 8px 6px;
+            border-bottom: 1px solid var(--border);
+            font-size: 0.74rem;
+            text-transform: uppercase;
+        }
+        .stream-table td { padding: 8px 6px; border-bottom: 1px solid rgba(255,255,255,0.04); }
+        .stream-badge { padding: 2px 7px; border-radius: 5px; font-size: 0.72rem; font-weight: 700; font-family: monospace; }
+        .b-paid { background: rgba(74, 222, 128, 0.2); color: #4ade80; }
+        .b-quote { background: rgba(250, 204, 21, 0.2); color: #facc15; }
+        .b-disc { background: rgba(56, 189, 248, 0.18); color: #38bdf8; }
+        .b-block { background: rgba(239, 68, 68, 0.2); color: #f87171; }
+        .country-tag { background: rgba(255,255,255,0.07); padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 0.74rem; }
+        .links-footer { display: flex; gap: 16px; flex-wrap: wrap; font-size: 0.85rem; color: var(--muted); margin-top: 8px; }
+        .links-footer a { color: var(--accent); text-decoration: none; }
+    </style>
+</head>
+<body>
+    <div class="header-bar">
+        <div class="title-group">
+            <h1>AIM NETWORK — OVERSEER DASHBOARD</h1>
+            <div class="status-pill" id="statusText">{{ status_dot }}</div>
+        </div>
+        <div class="wallet-box" title="{{ wallet }}">
+            Plånbok (Base USDC): <strong>{{ short_wallet }}</strong> • Läge: <strong>{{ v_mode_label }}</strong>
+        </div>
+    </div>
+
+    <div class="grid-2">
+        <div class="card" style="margin-bottom:0;">
+            <h2>💰 INTÄKTER (Base USDC Plånbok)</h2>
+            <div class="revenue-big" id="totalRevenue">${{ "%.2f"|format(total_rev) }} USDC</div>
+            <div class="revenue-sub">≈ {{ "%.2f"|format(total_sek) }} SEK • Direkt till {{ short_wallet }}</div>
+        </div>
+        <div class="card" style="margin-bottom:0;">
+            <h2>⚡ ANROPSVOLYM (x402 M2M)</h2>
+            <div class="revenue-big" style="color:#38bdf8;" id="totalCalls">{{ stats.calls_micro + stats.calls_premium }} st</div>
+            <div class="revenue-sub">Mikro ($0.01–$0.05): {{ stats.calls_micro }} st • Premium ($1.00): {{ stats.calls_premium }} st</div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>📡 LIVE TRAFIK- & KONVERTERINGS-RADAR (Externa AI-Botar & Besökare)</h2>
+        <div class="funnel-grid">
+            <div class="funnel-box" style="border-left: 3px solid #38bdf8;">
+                <div class="funnel-label">🔍 1. Katalog & Meny-läsningar</div>
+                <div class="funnel-num" style="color:#38bdf8;">{{ telemetry.discovery_hits }} st</div>
+                <div class="revenue-sub">/llms.txt, /agents.json, /mcp & teaser</div>
+            </div>
+            <div class="funnel-box" style="border-left: 3px solid #facc15;">
+                <div class="funnel-label">🚪 2. Prisförfrågningar (402)</div>
+                <div class="funnel-num" style="color:#facc15;">{{ telemetry.quotes_402 }} st</div>
+                <div class="revenue-sub">Botar som fått x402-prisförslag</div>
+            </div>
+            <div class="funnel-box" style="border-left: 3px solid #4ade80;">
+                <div class="funnel-label">💰 3. Betalda Leveranser (200)</div>
+                <div class="funnel-num" style="color:#4ade80;">{{ telemetry.paid_200 }} st ({{ telemetry.conversion_rate_pct }}%)</div>
+                <div class="revenue-sub">Konverteringsgrad (402 ➔ Köp)</div>
+            </div>
+            <div class="funnel-box" style="border-left: 3px solid #a855f7;">
+                <div class="funnel-label">⚡ 4. Snitt-Svarstid & Skydd</div>
+                <div class="funnel-num" style="color:#c084fc;">{{ telemetry.avg_latency_ms }} ms</div>
+                <div class="revenue-sub">Totalt: {{ telemetry.total_external_requests }} anrop • Blockerade: {{ telemetry.blocked_hits }}</div>
+            </div>
+        </div>
+
+        <div style="margin-bottom: 10px;">
+            <div class="funnel-label" style="margin-bottom:6px;">🤖 Identifierade Besökare & Bot-Typer (User-Agent Detektor):</div>
+            {% if telemetry.agent_breakdown %}
+                {% for ab in telemetry.agent_breakdown %}
+                    <span class="agent-pill">{{ ab.agent_type }}: <strong>{{ ab.cnt }}</strong></span>
+                {% endfor %}
+            {% else %}
+                <span class="agent-pill">Väntar på första externa anropet...</span>
+            {% endif %}
+        </div>
+
+        <div style="overflow-x:auto;">
+            <table class="stream-table">
+                <thead>
+                    <tr>
+                        <th>Tid (UTC)</th>
+                        <th>Land</th>
+                        <th>Identifierad Agent / Besökare</th>
+                        <th>Anropad Endpoint</th>
+                        <th>Händelse / Status</th>
+                        <th style="text-align:right;">Svarstid</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% if stream_events %}
+                        {% for ev in stream_events %}
+                        <tr>
+                            <td style="font-family:monospace;color:var(--muted);">{{ ev.ts_short }}</td>
+                            <td><span class="country-tag">{{ ev.country }}</span></td>
+                            <td>{{ ev.agent_type }}</td>
+                            <td><code class="endpoint-code">{{ ev.method }} {{ ev.path }}</code></td>
+                            <td><span class="stream-badge {{ ev.badge_cls }}">{{ ev.badge_txt }}</span></td>
+                            <td style="font-family:monospace;text-align:right;">{{ "%.1f"|format(ev.latency_ms) }} ms</td>
+                        </tr>
+                        {% endfor %}
+                    {% else %}
+                        <tr>
+                            <td colspan="6" style="text-align:center;color:var(--muted);padding:14px;">
+                                Inga externa anrop loggade ännu — klicka på /llms.txt eller /api/v1/free-teaser för att se strömmen live!
+                            </td>
+                        </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>🤖 AGENT-BESÄTTNING (4 Autonoma Moduler i Drift)</h2>
+        <div class="agent-grid" id="agentCrewGrid">
+            <div class="agent-box">
+                <h3>🟢 1. Spanar- & Bygg-Agent</h3>
+                <p>Skannar trender varje timme och bygger nya API:er automatiskt ({{ stats.dynamic_endpoints|length }} st extra byggda).</p>
+            </div>
+            <div class="agent-box">
+                <h3>🟢 2. Data- & Analys-Agent</h3>
+                <p>Hämtar och beräknar live-priser, volatilitet och handels-signaler på under 0,15 sek.</p>
+            </div>
+            <div class="agent-box">
+                <h3>🟢 3. x402 Kassa- & Säkerhets-Agent</h3>
+                <p>Tar betalt i USDC på Base ({{ short_wallet }}) och stoppar obetalda anrop (HTTP 402).</p>
+            </div>
+            <div class="agent-box">
+                <h3>🟢 4. Skyltfönster-Agent</h3>
+                <p>Marknadsför alla {{ total_active_apis }} tjänster automatiskt i /llms.txt och /agents.json.</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>📊 AKTIVA TJÄNSTER (Klicka på "👁️ Granska Data" för att se exakt vad som byggts & säljs)</h2>
+        <div class="endpoint-row">
+            <div>
+                <span class="endpoint-code">1. /api/v1/crypto-pulse</span>
+                <span class="price-tag">${{ "%.2f"|format(price_micro) }} USDC</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                <span>Anrop: <strong>{{ stats.calls_micro }} st</strong> | Intäkt: <strong>${{ "%.2f"|format(micro_rev) }} USDC</strong> | 🟢</span>
+                <button class="btn-preview" onclick="previewProduct('/api/v1/crypto-pulse')">👁️ Granska Data</button>
+            </div>
+        </div>
+        <div class="endpoint-row">
+            <div>
+                <span class="endpoint-code">2. /api/v1/base-dex-radar</span>
+                <span class="price-tag">${{ "%.2f"|format(price_dex) }} USDC</span>
+                <span class="badge-scout" style="background:#7c3aed;margin-left:6px;">BASE DEX WHALE RADAR</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                <span>Status: 🟢 Live (DexScreener Base)</span>
+                <button class="btn-preview" onclick="previewProduct('/api/v1/base-dex-radar')">👁️ Granska Data</button>
+            </div>
+        </div>
+        <div class="endpoint-row">
+            <div>
+                <span class="endpoint-code">3. /api/v1/deep-market-report</span>
+                <span class="price-tag">${{ "%.2f"|format(price_premium) }} USDC</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                <span>Anrop: <strong>{{ stats.calls_premium }} st</strong> | Intäkt: <strong>${{ "%.2f"|format(prem_rev) }} USDC</strong> | 🟢</span>
+                <button class="btn-preview" onclick="previewProduct('/api/v1/deep-market-report')">👁️ Granska Data</button>
+            </div>
+        </div>
+        {% for ep in stats.dynamic_endpoints %}
+        <div class="endpoint-row">
+            <div>
+                <span class="endpoint-code">{{ loop.index + 3 }}. {{ ep.endpoint_path }}</span>
+                <span class="price-tag">${{ "%.2f"|format(ep.price_usdc) }} USDC</span>
+                <span class="badge-scout" style="background:#059669;margin-left:6px;">AUTO-BYGGD ({{ ep.asset_symbol }})</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                <span>Anrop: <strong>{{ ep.calls_count }} st</strong> | Intäkt: <strong>${{ "%.2f"|format(ep.revenue_usdc) }} USDC</strong> | 🟢</span>
+                <button class="btn-preview" data-ep="{{ ep.endpoint_path }}" onclick="previewProduct(this.getAttribute('data-ep'))">👁️ Granska Data</button>
+            </div>
+        </div>
+        {% endfor %}
+        <pre id="productInspectorBox" class="inspector-pre"></pre>
+    </div>
+
+    <div class="card">
+        <h2>🔍 SPANAR-LOGG (Förslag från din Autonoma Spanar-agent)</h2>
+        <div id="discoveriesContainer">
+            {% for d in stats.discoveries %}
+            <div class="log-item">
+                <div class="log-header">
+                    <span class="badge-scout">{{ d.status }}</span>
+                    <code class="endpoint-code">{{ d.suggested_endpoint }}</code>
+                    <span class="price-tag">${{ "%.2f"|format(d.suggested_price_usdc) }} USDC</span>
+                </div>
+                <div class="log-title">{{ d.topic }}</div>
+                <div class="log-rationale">{{ d.rationale }}</div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>🎛️ KOMMANDOCENTRAL (PIN-SKYDDAD)</h2>
+        <div class="actions-bar">
+            <button class="btn-stop" onclick="toggleEmergencyStop()">{{ btn_label }}</button>
+            <button class="btn-scout" onclick="runSelfCheck()">🧪 Kör Själv-Diagnos</button>
+            <button class="btn-scout" onclick="toggleVerifyMode()">🔐 Växla On-Chain/Hybrid</button>
+            <button class="btn-scout" onclick="runScoutNow()">🔍 Kör Spanar-Agent Nu</button>
+            <button class="btn-refresh" onclick="window.location.reload()">🔄 Uppdatera Siffror</button>
+        </div>
+        <div class="links-footer" style="margin-top: 16px;">
+            <span>Maskin-kataloger för AI-botar:</span>
+            <a href="/api/v1/free-teaser" target="_blank">/api/v1/free-teaser (Gratis Smakprov)</a>
+            <a href="/llms.txt" target="_blank">/llms.txt</a>
+            <a href="/agents.json" target="_blank">/agents.json</a>
+            <a href="/mcp" target="_blank">/mcp (MCP Server)</a>
+            <a href="/.well-known/agent.json" target="_blank">/.well-known/agent.json</a>
+            <a href="/docs" target="_blank">/docs (OpenAPI)</a>
+        </div>
+    </div>
+
+    <script>
+        async function toggleEmergencyStop() {
+            const pin = prompt("Ange din hemliga Admin PIN / Token för att växla Nödstopp:");
+            if (!pin) return;
+            const res = await fetch("/api/admin/toggle-pause", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ pin: pin })
+            });
+            if (res.ok) {
+                window.location.reload();
+            } else {
+                const err = await res.json();
+                alert("Åtgärd nekad: " + (err.detail || "Fel PIN-kod"));
+            }
+        }
+
+        async function toggleVerifyMode() {
+            const pin = prompt("Ange din hemliga Admin PIN / Token för att växla verifieringsläge:");
+            if (!pin) return;
+            const res = await fetch("/api/admin/toggle-mode", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ pin: pin })
+            });
+            if (res.ok) {
+                window.location.reload();
+            } else {
+                const err = await res.json();
+                alert("Åtgärd nekad: " + (err.detail || "Fel PIN-kod"));
+            }
+        }
+
+        async function runScoutNow() {
+            const pin = prompt("Ange din hemliga Admin PIN / Token för att köra Spanar-Agenten:");
+            if (!pin) return;
+            const res = await fetch("/cron/discover", {
+                method: "POST",
+                headers: { "X-Admin-Pin": pin }
+            });
+            if (res.ok) {
+                window.location.reload();
+            } else {
+                const err = await res.json();
+                alert("Åtgärd nekad: " + (err.detail || "Fel PIN-kod"));
+            }
+        }
+
+        async function previewProduct(endpointPath) {
+            const box = document.getElementById("productInspectorBox");
+            box.style.display = "block";
+            box.textContent = "Hämtar live-produkt från " + endpointPath + " ...";
+            const res = await fetch("/api/admin/preview-product?endpoint=" + encodeURIComponent(endpointPath));
+            const data = await res.json();
+            box.textContent = "// LIVE PRODUKT-INSPEKTÖR FÖR: " + endpointPath + "\n" + JSON.stringify(data, null, 2);
+        }
+
+        async function runSelfCheck() {
+            const box = document.getElementById("productInspectorBox");
+            box.style.display = "block";
+            box.textContent = "Kör själv-diagnos på alla 4 agenter...";
+            const res = await fetch("/api/admin/self-check");
+            const data = await res.json();
+            box.textContent = "// SJÄLV-DIAGNOS RESULTAT:\n" + JSON.stringify(data, null, 2);
+        }
+
+        setInterval(() => {
+            window.location.reload();
+        }, 30000);
+    </script>
+</body>
+</html>

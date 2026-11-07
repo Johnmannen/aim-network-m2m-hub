@@ -5,11 +5,14 @@ synthesizes high-value M2M micro-API product proposals into SQLite discovery_log
 AND automatically registers & deploys live payable endpoints under /api/v1/trending/{slug}.
 """
 
+import logging
 import re
 from typing import Any, Dict, Optional
 import httpx
 from app.config import settings
 from app.database import add_discovery_log, get_stats, register_dynamic_endpoint
+
+logger = logging.getLogger(__name__)
 
 FALLBACK_CANDIDATES = [
     ("Virtuals Protocol", "VIRTUAL", "virtual-protocol"),
@@ -45,8 +48,8 @@ async def run_autonomous_scout(db_path: Optional[str] = None) -> Dict[str, Any]:
                         chosen_symbol = item.get("symbol", chosen_symbol).upper()
                         chosen_cg_id = item.get("id", chosen_cg_id)
                         break
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("CoinGecko trending fetch fallback triggered: %s", exc)
 
     slug = re.sub(r"[^a-z0-9]", "", chosen_symbol.lower()) or "virtual"
     if slug in existing_slugs:

@@ -172,3 +172,24 @@ def test_full_end_to_end_system(tmp_path: Path):
         assert tel["paid_200"] >= 5
         assert len(tel["recent_stream"]) >= 5
 
+        # 10. Verify /cron/discover rejects invalid X-Scout-Token header (401)
+        r_scout_bad = client.post(
+            "/cron/discover", headers={"X-Scout-Token": "invalid_secret"}
+        )
+        assert r_scout_bad.status_code == 401
+
+        r_scout_good = client.post(
+            "/cron/discover", headers={"X-Scout-Token": settings.SCOUT_SECRET_TOKEN}
+        )
+        assert r_scout_good.status_code == 200
+
+        # 11. Verify PIN brute-force lockout after MAX_PIN_FAILURES (5 attempts -> 429)
+        for _ in range(settings.MAX_PIN_FAILURES):
+            r_fail = client.post("/api/admin/toggle-pause", json={"pin": "wrong"})
+            assert r_fail.status_code == 401
+
+        r_locked = client.post(
+            "/api/admin/toggle-pause", json={"pin": settings.ADMIN_PIN}
+        )
+        assert r_locked.status_code == 429
+

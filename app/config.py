@@ -1,34 +1,46 @@
 """
 Configuration module for AIM Network (Autonomous M2M API Hub).
-Loads environment variables from .env with safe defaults.
+Loads environment variables from .env with strict security defaults.
 """
 
 import os
+import secrets
+from decimal import Decimal
 from pathlib import Path
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
+# Ephemeral fallback token generated per process if ADMIN_PIN is not set in env
+_GENERATED_FALLBACK_PIN = secrets.token_urlsafe(24)
+
 
 class Settings:
     """Centralized application settings."""
 
-    PROJECT_NAME: str = "AIM Network — Autonomous M2M API Hub"
-    VERSION: str = "1.0.0"
+    PROJECT_NAME: str = "AIM Network - Autonomous M2M API Hub"
+    VERSION: str = "1.1.0"
+    CANONICAL_BASE_URL: str = os.getenv(
+        "CANONICAL_BASE_URL", "https://johngarp.click"
+    ).rstrip("/")
 
-    # Base L2 USDC recipient address (John's wallet)
+    # Base L2 USDC recipient address
     WALLET_ADDRESS: str = os.getenv(
         "WALLET_ADDRESS", "0x1bbae07abebbb61f611391e02e81ee26b0c47b79"
     )
 
-    # Admin security PIN for Emergency Stop & manual triggers
-    ADMIN_PIN: str = os.getenv("ADMIN_PIN", "2026")
+    # Admin security token/PIN for Emergency Stop & manual triggers (never hardcoded in repo)
+    ADMIN_PIN: str = os.getenv("ADMIN_PIN", "") or _GENERATED_FALLBACK_PIN
+    SCOUT_SECRET_TOKEN: str = os.getenv("SCOUT_SECRET_TOKEN", "") or ADMIN_PIN
 
-    # x402 verification mode: "hybrid" or "strict_onchain"
-    X402_VERIFY_MODE: str = os.getenv("X402_VERIFY_MODE", "hybrid")
+    # Production default is ALWAYS "strict_onchain".
+    # Simulated `test_tx_` tokens are only accepted when TESTING=true AND X402_VERIFY_MODE=hybrid.
+    X402_VERIFY_MODE: str = os.getenv("X402_VERIFY_MODE", "strict_onchain")
+    TESTING: bool = os.getenv("TESTING", "false").lower() in ("true", "1", "yes")
 
-    # Public Base Mainnet RPC + Fallback RPCs & Native USDC contract on Base
+    # Public Base Mainnet RPC + Fallback RPCs & Native USDC contract on Base (Chain ID 8453)
+    BASE_CHAIN_ID: int = 8453
     BASE_RPC_URL: str = os.getenv("BASE_RPC_URL", "https://mainnet.base.org")
     BASE_RPC_FALLBACKS: list[str] = [
         "https://mainnet.base.org",
@@ -39,15 +51,27 @@ class Settings:
         "USDC_CONTRACT_ADDRESS", "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
     )
 
-    # Rate Limiting (requests per 60s window per IP on unpaid endpoints)
+    # Rate Limiting & PIN Brute-Force Lockout
     RATE_LIMIT_PER_MINUTE: int = int(os.getenv("RATE_LIMIT_PER_MINUTE", "60"))
+    TRUST_PROXY_HEADERS: bool = (
+        os.getenv("TRUST_PROXY_HEADERS", "false").lower() == "true"
+    )
+    MAX_PIN_FAILURES: int = 5
+    PIN_LOCKOUT_SECONDS: int = 900  # 15 minutes
 
-    # Pricing tiers in USDC
-    PRICE_MICRO_USDC: float = 0.01
-    PRICE_DYNAMIC_USDC: float = 0.05
-    PRICE_DEX_RADAR_USDC: float = 0.05
-    PRICE_PREMIUM_USDC: float = 1.00
-    PRICE_VIP_24H_USDC: float = 2.00
+    # Pricing tiers in USDC (Decimal-safe)
+    PRICE_MICRO_DEC: Decimal = Decimal("0.01")
+    PRICE_DYNAMIC_DEC: Decimal = Decimal("0.05")
+    PRICE_DEX_RADAR_DEC: Decimal = Decimal("0.05")
+    PRICE_PREMIUM_DEC: Decimal = Decimal("1.00")
+    PRICE_VIP_24H_DEC: Decimal = Decimal("2.00")
+
+    PRICE_MICRO_USDC: float = float(PRICE_MICRO_DEC)
+    PRICE_DYNAMIC_USDC: float = float(PRICE_DYNAMIC_DEC)
+    PRICE_DEX_RADAR_USDC: float = float(PRICE_DEX_RADAR_DEC)
+    PRICE_PREMIUM_USDC: float = float(PRICE_PREMIUM_DEC)
+    PRICE_VIP_24H_USDC: float = float(PRICE_VIP_24H_DEC)
+
     VIP_PASS_MAX_CALLS: int = 1000
     VIP_PASS_DURATION_HOURS: int = 24
 
@@ -64,4 +88,3 @@ class Settings:
 
 
 settings = Settings()
-
