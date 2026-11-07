@@ -61,6 +61,7 @@ class Settings:
     )
     MAX_PIN_FAILURES: int = 5
     PIN_LOCKOUT_SECONDS: int = 900  # 15 minutes
+    MIN_CONFIRMATIONS: int = int(os.getenv("MIN_CONFIRMATIONS", "1"))
 
     # Pricing tiers in USDC (Decimal-safe)
     PRICE_MICRO_DEC: Decimal = Decimal("0.01")

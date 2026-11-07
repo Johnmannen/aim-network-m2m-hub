@@ -16,9 +16,12 @@ from pydantic import BaseModel
 
 from app.config import settings
 from app.database import (
+    check_pin_lockout_db,
+    clear_pin_failures_db,
     export_db_snapshot,
     get_stats,
     import_db_snapshot,
+    record_pin_failure_db,
     set_pause_state,
 )
 from app.services.market_data import (
@@ -45,16 +48,28 @@ def verify_admin_pin_with_lockout(
 ) -> None:
     """
     Verify admin PIN (or optionally SCOUT_SECRET_TOKEN) using constant-time
-    secrets.compare_digest and enforce brute-force lockout after MAX_PIN_FAILURES.
+    secrets.compare_digest and enforce brute-force lockout after MAX_PIN_FAILURES
+    (persisted in SQLite + in-memory).
     """
     client_ip = request.client.host if request.client else "unknown"
+    db_override = (
+        request.app.state.db_path
+        if hasattr(request.app, "state") and hasattr(request.app.state, "db_path")
+        else None
+    )
     now = time.monotonic()
     recent_fails = [
         t for t in _pin_failures[client_ip] if (now - t) < settings.PIN_LOCKOUT_SECONDS
     ]
     _pin_failures[client_ip] = recent_fails
 
-    if len(recent_fails) >= settings.MAX_PIN_FAILURES:
+    is_locked_db = check_pin_lockout_db(
+        client_ip=client_ip,
+        window_seconds=settings.PIN_LOCKOUT_SECONDS,
+        max_failures=settings.MAX_PIN_FAILURES,
+        db_path=db_override,
+    )
+    if len(recent_fails) >= settings.MAX_PIN_FAILURES or is_locked_db:
         raise HTTPException(
             status_code=429,
             detail="För många felaktiga PIN-försök. Kontot är tillfälligt låst i 15 minuter.",
@@ -71,6 +86,7 @@ def verify_admin_pin_with_lockout(
     )
     if not (is_valid_admin or is_valid_scout):
         _pin_failures[client_ip].append(now)
+        record_pin_failure_db(client_ip, db_path=db_override)
         raise HTTPException(
             status_code=401,
             detail="Ogiltig eller saknad Admin PIN-kod / Token.",
@@ -78,6 +94,7 @@ def verify_admin_pin_with_lockout(
 
     # Clear failure counter on success
     _pin_failures.pop(client_ip, None)
+    clear_pin_failures_db(client_ip, db_path=db_override)
 
 
 class PauseToggleRequest(BaseModel):

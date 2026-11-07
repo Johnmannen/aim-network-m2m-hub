@@ -237,7 +237,7 @@ async def fetch_dynamic_asset_pulse(
                     vol_24h = round(float(data.get("usd_24h_vol", 0.0) or 0.0), 2)
                     source_status = "coingecko_live"
     except Exception as exc:
-        logger.warning("Dynamic asset pulse fallback triggered for %s: %s", slug, exc)
+        logger.warning("Base DEX radar fallback triggered: %s", exc)
 
     result = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -340,7 +340,7 @@ async def fetch_base_dex_radar() -> Dict[str, Any]:
                     pools = live_pools
                     source_status = "dexscreener_base_live"
     except Exception as exc:
-        logger.warning("Dynamic asset pulse fallback triggered for %s: %s", slug, exc)
+        logger.warning("Base DEX radar fallback triggered: %s", exc)
 
     payload = {
         "timestamp": datetime.now(timezone.utc).isoformat(),

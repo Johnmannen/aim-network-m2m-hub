@@ -8,6 +8,7 @@ Implements:
 - Shared httpx.AsyncClient reuse when available on app.state
 """
 
+import asyncio
 import logging
 import re
 from decimal import Decimal, ROUND_HALF_UP
@@ -23,6 +24,7 @@ from app.database import (
     get_stats,
     record_paid_call,
 )
+from app.services.cloud_backup import push_to_cloud_gist
 
 logger = logging.getLogger(__name__)
 
@@ -167,6 +169,36 @@ async def verify_base_usdc_transaction(
     if receipt.get("status") != "0x1":
         return False, "", "Transaction failed or reverted on-chain."
 
+    min_conf = int(getattr(settings, "MIN_CONFIRMATIONS", 1))
+    if receipt.get("blockNumber") and min_conf > 1:
+        tx_block = int(receipt["blockNumber"], 16)
+        block_payload = {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "eth_blockNumber",
+            "params": [],
+        }
+        try:
+            if http_client is not None:
+                b_resp = await http_client.post(
+                    endpoint_rpc, json=block_payload, timeout=5.0
+                )
+            else:
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    b_resp = await client.post(endpoint_rpc, json=block_payload)
+            b_data = b_resp.json()
+            if b_data and b_data.get("result"):
+                latest_block = int(b_data["result"], 16)
+                confirmations = max(0, latest_block - tx_block + 1)
+                if confirmations < min_conf:
+                    return (
+                        False,
+                        "",
+                        f"Insufficient block confirmations ({confirmations}/{min_conf}).",
+                    )
+        except Exception as exc:
+            logger.warning("Block confirmation check skipped: %s", exc)
+
     expected_units = to_micro_usdc(expected_amount_usdc)
     padded_recipient = "0x" + target_wallet.replace("0x", "").rjust(64, "0")
 
@@ -273,6 +305,8 @@ async def require_x402_payment(
                     verified_mode="onchain_vip",
                     db_path=db_path,
                 )
+                if not settings.TESTING:
+                    asyncio.create_task(push_to_cloud_gist(db_path=db_path))
                 return None
             except ValueError:
                 return build_402_response(
@@ -305,6 +339,8 @@ async def require_x402_payment(
             verified_mode=verified_label,
             db_path=db_path,
         )
+        if not settings.TESTING:
+            asyncio.create_task(push_to_cloud_gist(db_path=db_path))
     except ValueError:
         return build_402_response(
             price_usdc,

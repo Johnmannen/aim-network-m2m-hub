@@ -118,6 +118,16 @@ def init_db(db_path: Optional[str] = None) -> None:
             """
         )
 
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS pin_failures (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                client_ip TEXT NOT NULL,
+                failed_at REAL NOT NULL
+            );
+            """
+        )
+
         now = datetime.now(timezone.utc).isoformat()
         conn.execute(
             """
@@ -759,3 +769,50 @@ def import_db_snapshot(
                 )
         conn.commit()
     return get_stats(db_path)
+
+
+def check_pin_lockout_db(
+    client_ip: str,
+    window_seconds: int = 900,
+    max_failures: int = 5,
+    db_path: Optional[str] = None,
+) -> bool:
+    """Return True if client_ip has >= max_failures in the last window_seconds (persisted in SQLite)."""
+    import time as _time
+
+    init_db(db_path)
+    cutoff = _time.time() - window_seconds
+    with get_connection(db_path) as conn:
+        conn.execute("DELETE FROM pin_failures WHERE failed_at < ?;", (cutoff,))
+        cnt = conn.execute(
+            "SELECT COUNT(*) as c FROM pin_failures WHERE client_ip = ?;",
+            (client_ip,),
+        ).fetchone()["c"]
+        conn.commit()
+        return int(cnt) >= max_failures
+
+
+def record_pin_failure_db(client_ip: str, db_path: Optional[str] = None) -> None:
+    """Persist a failed PIN/token attempt in SQLite."""
+    import time as _time
+
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        conn.execute(
+            "INSERT INTO pin_failures (client_ip, failed_at) VALUES (?, ?);",
+            (client_ip, _time.time()),
+        )
+        conn.commit()
+
+
+def clear_pin_failures_db(
+    client_ip: Optional[str] = None, db_path: Optional[str] = None
+) -> None:
+    """Clear failed PIN attempts for client_ip (or all if client_ip is None)."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        if client_ip is None:
+            conn.execute("DELETE FROM pin_failures;")
+        else:
+            conn.execute("DELETE FROM pin_failures WHERE client_ip = ?;", (client_ip,))
+        conn.commit()
