@@ -66,7 +66,7 @@ Allow: /agents.json
 Allow: /.well-known/agent.json
 Allow: /openapi.json
 Allow: /api/v1/
-Sitemap: https://aim-network-m2m-hub.onrender.com/sitemap.xml
+Sitemap: https://johngarp.click/sitemap.xml
 """
 
 
@@ -75,7 +75,9 @@ async def sitemap_xml(request: Request):
     """Dynamic XML sitemap for search engines and AI directory crawlers."""
     from fastapi.responses import Response
 
-    base = "https://aim-network-m2m-hub.onrender.com"
+    base = "https://johngarp.click"
+    db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
+    stats = get_stats(db_override)
     urls = [
         f"{base}/",
         f"{base}/llms.txt",
@@ -85,6 +87,8 @@ async def sitemap_xml(request: Request):
         f"{base}/api/v1/crypto-pulse",
         f"{base}/api/v1/deep-market-report",
     ]
+    for ep in stats.get("dynamic_endpoints", []):
+        urls.append(f"{base}{ep['endpoint_path']}")
     xml_items = "".join(f"<url><loc>{u}</loc></url>" for u in urls)
     xml = f'<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{xml_items}</urlset>'
     return Response(content=xml, media_type="application/xml")

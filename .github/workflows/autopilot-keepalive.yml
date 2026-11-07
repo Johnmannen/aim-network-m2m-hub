@@ -12,14 +12,15 @@ jobs:
     steps:
       - name: Ping Health & Warm Market Cache
         run: |
-          echo "Pinging AIM Network Health & Discovery Manifests..."
-          curl -fsS --max-time 25 "https://aim-network-m2m-hub.onrender.com/health"
+          echo "Pinging AIM Network on johngarp.click & Render..."
+          curl -fsS --max-time 25 "https://johngarp.click/health"
           echo ""
-          curl -fsS --max-time 25 "https://aim-network-m2m-hub.onrender.com/llms.txt" > /dev/null
-          curl -fsS --max-time 25 "https://aim-network-m2m-hub.onrender.com/agents.json" > /dev/null
+          curl -fsS --max-time 25 "https://johngarp.click/llms.txt" > /dev/null
+          curl -fsS --max-time 25 "https://johngarp.click/agents.json" > /dev/null
 
       - name: Trigger Autonomous Scout (/cron/discover)
         run: |
           echo "Triggering Autonomous Scout..."
-          curl -fsS -X POST --max-time 25 "https://aim-network-m2m-hub.onrender.com/cron/discover"
+          curl -fsS -X POST --max-time 25 "https://johngarp.click/cron/discover"
           echo ""
+
