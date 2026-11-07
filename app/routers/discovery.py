@@ -203,6 +203,19 @@ async def well_known_agent_card(request: Request) -> dict:
     return await agents_json_manifest(request)
 
 
+@router.get("/.well-known/glama.json", response_class=JSONResponse)
+async def well_known_glama_manifest() -> dict:
+    """Glama.ai MCP Directory ownership & metadata verification manifest."""
+    return {
+        "$schema": "https://glama.ai/mcp/schemas/connector.json",
+        "name": "aim-network-m2m-hub",
+        "description": "Autonomous M2M crypto market pulse, Base L2 DEX whale liquidity radar, and quantitative trading signals via HTTP 402 (x402) USDC micropayments on Base.",
+        "url": "https://johngarp.click/mcp",
+        "repository": "https://github.com/Johnmannen/aim-network-m2m-hub",
+        "maintainers": [{"email": "John.garp.jg@gmail.com"}],
+    }
+
+
 @router.api_route("/cron/discover", methods=["GET", "POST"], response_class=JSONResponse)
 async def trigger_autonomous_scout(
     request: Request,
