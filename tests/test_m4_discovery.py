@@ -36,7 +36,7 @@ def test_discovery_manifests_and_scout(tmp_path: Path):
     assert r_agents.status_code == 200
     agents_data = r_agents.json()
     assert agents_data["auth"]["recipient_wallet"] == settings.WALLET_ADDRESS
-    assert len(agents_data["endpoints"]) == 2
+    assert len(agents_data["endpoints"]) >= 4
 
     r_wk = client.get("/.well-known/agent.json")
     assert r_wk.status_code == 200

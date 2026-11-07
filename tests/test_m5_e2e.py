@@ -35,7 +35,7 @@ def test_full_end_to_end_system(tmp_path: Path):
 
         r_agents = client.get("/agents.json")
         assert r_agents.status_code == 200
-        assert len(r_agents.json()["endpoints"]) == 2
+        assert len(r_agents.json()["endpoints"]) >= 4
 
         # 2. Dashboard initial render
         r_dash = client.get("/")
