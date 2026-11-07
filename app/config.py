@@ -44,7 +44,14 @@ class Settings:
 
     # Pricing tiers in USDC
     PRICE_MICRO_USDC: float = 0.01
+    PRICE_DYNAMIC_USDC: float = 0.05
     PRICE_PREMIUM_USDC: float = 1.00
+
+    # Autonomous Scout Auto-Pilot interval in seconds (default: every 3600s = 1 hour)
+    SCOUT_INTERVAL_SECONDS: int = int(os.getenv("SCOUT_INTERVAL_SECONDS", "3600"))
+    SCOUT_AUTOPILOT_ENABLED: bool = (
+        os.getenv("SCOUT_AUTOPILOT_ENABLED", "true").lower() == "true"
+    )
 
     # SQLite database path
     DATABASE_PATH: str = os.getenv(

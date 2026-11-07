@@ -116,8 +116,23 @@ def test_full_end_to_end_system(tmp_path: Path):
         )
         assert r_resumed_call.status_code == 200
 
-        # 7. Run Autonomous Scout
+        # 7. Run Autonomous Scout & verify auto-deployed live endpoint works
         r_scout = client.post("/cron/discover")
         assert r_scout.status_code == 200
-        assert r_scout.json()["status"] == "success"
+        scout_json = r_scout.json()
+        assert scout_json["status"] == "success"
+        deployed_ep = scout_json["discovery"]["deployed_endpoint"]
+        dyn_path = deployed_ep["endpoint_path"]
+
+        # Unpaid call to auto-deployed endpoint returns 402 ($0.05 USDC)
+        r_dyn_unpaid = client.get(dyn_path)
+        assert r_dyn_unpaid.status_code == 402
+        assert r_dyn_unpaid.json()["payment_details"]["amount"] == "0.05"
+
+        # Paid call to auto-deployed endpoint returns 200 OK
+        r_dyn_paid = client.get(
+            dyn_path, headers={"X-PAYMENT-PROOF": "test_tx_e2e_dynamic_001"}
+        )
+        assert r_dyn_paid.status_code == 200
+        assert "asset" in r_dyn_paid.json()
 

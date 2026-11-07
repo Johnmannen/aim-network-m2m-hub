@@ -7,6 +7,7 @@ Combines:
 - x402-protected M2M Data Endpoints (/api/v1/crypto-pulse & /api/v1/deep-market-report)
 """
 
+import asyncio
 from contextlib import asynccontextmanager
 import time
 from collections import defaultdict
@@ -19,13 +20,31 @@ from app.database import init_db
 from app.routers.api_v1 import router as api_v1_router
 from app.routers.dashboard import router as dashboard_router
 from app.routers.discovery import router as discovery_router
+from app.services.scout import run_autonomous_scout
+
+
+async def _autopilot_scout_loop(db_path: str | None) -> None:
+    """Background loop that periodically runs the Autonomous Scout & Auto-Deployer."""
+    while True:
+        try:
+            await run_autonomous_scout(db_path=db_path)
+        except Exception:
+            pass
+        await asyncio.sleep(max(60, settings.SCOUT_INTERVAL_SECONDS))
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     db_override = getattr(app.state, "db_path", None)
     init_db(db_override)
-    yield
+    scout_task = None
+    if settings.SCOUT_AUTOPILOT_ENABLED:
+        scout_task = asyncio.create_task(_autopilot_scout_loop(db_override))
+    try:
+        yield
+    finally:
+        if scout_task:
+            scout_task.cancel()
 
 
 def create_app(db_path: str | None = None) -> FastAPI:

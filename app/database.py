@@ -68,6 +68,22 @@ def init_db(db_path: Optional[str] = None) -> None:
             """
         )
 
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS dynamic_endpoints (
+                slug TEXT PRIMARY KEY,
+                endpoint_path TEXT NOT NULL UNIQUE,
+                asset_name TEXT NOT NULL,
+                asset_symbol TEXT NOT NULL,
+                coingecko_id TEXT NOT NULL,
+                price_usdc REAL NOT NULL DEFAULT 0.05,
+                calls_count INTEGER NOT NULL DEFAULT 0,
+                revenue_usdc REAL NOT NULL DEFAULT 0.0,
+                created_at TEXT NOT NULL
+            );
+            """
+        )
+
         now = datetime.now(timezone.utc).isoformat()
         conn.execute(
             """
@@ -103,7 +119,10 @@ def get_stats(db_path: Optional[str] = None) -> Dict[str, Any]:
     with get_connection(db_path) as conn:
         state_row = conn.execute("SELECT * FROM system_state WHERE id = 1;").fetchone()
         discoveries = conn.execute(
-            "SELECT * FROM discovery_logs ORDER BY id DESC LIMIT 5;"
+            "SELECT * FROM discovery_logs ORDER BY id DESC LIMIT 8;"
+        ).fetchall()
+        dynamic_eps = conn.execute(
+            "SELECT * FROM dynamic_endpoints ORDER BY created_at DESC LIMIT 12;"
         ).fetchall()
         recent_txs = conn.execute(
             "SELECT * FROM used_transactions ORDER BY created_at DESC LIMIT 10;"
@@ -117,6 +136,7 @@ def get_stats(db_path: Optional[str] = None) -> Dict[str, Any]:
             "revenue_usdc": round(float(state_row["revenue_usdc"]), 4),
             "updated_at": state_row["updated_at"],
             "discoveries": [dict(row) for row in discoveries],
+            "dynamic_endpoints": [dict(row) for row in dynamic_eps],
             "recent_transactions": [dict(row) for row in recent_txs],
         }
 
@@ -231,4 +251,52 @@ def add_discovery_log(
             "SELECT * FROM discovery_logs WHERE id = ?;", (row_id,)
         ).fetchone()
         return dict(row)
+
+
+def register_dynamic_endpoint(
+    slug: str,
+    asset_name: str,
+    asset_symbol: str,
+    coingecko_id: str,
+    price_usdc: float = 0.05,
+    db_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Register or return an auto-built dynamic M2M endpoint."""
+    init_db(db_path)
+    clean_slug = slug.lower().strip()
+    endpoint_path = f"/api/v1/trending/{clean_slug}"
+    now = datetime.now(timezone.utc).isoformat()
+    with get_connection(db_path) as conn:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO dynamic_endpoints
+            (slug, endpoint_path, asset_name, asset_symbol, coingecko_id, price_usdc, calls_count, revenue_usdc, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, 0, 0.0, ?);
+            """,
+            (clean_slug, endpoint_path, asset_name, asset_symbol, coingecko_id, price_usdc, now),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT * FROM dynamic_endpoints WHERE slug = ?;", (clean_slug,)
+        ).fetchone()
+        return dict(row)
+
+
+def increment_dynamic_endpoint_stats(
+    slug: str, amount_usdc: float, db_path: Optional[str] = None
+) -> None:
+    """Increment call counter and revenue on a specific dynamic endpoint."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        conn.execute(
+            """
+            UPDATE dynamic_endpoints
+            SET calls_count = calls_count + 1,
+                revenue_usdc = ROUND(revenue_usdc + ?, 4)
+            WHERE slug = ?;
+            """,
+            (amount_usdc, slug.lower().strip()),
+        )
+        conn.commit()
+
 

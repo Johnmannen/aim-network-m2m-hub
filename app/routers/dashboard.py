@@ -136,6 +136,21 @@ async def overseer_dashboard(request: Request) -> str:
         </div>
         """
 
+    dynamic_endpoints_html = ""
+    idx_ep = 3
+    for ep in stats.get("dynamic_endpoints", []):
+        dynamic_endpoints_html += f"""
+        <div class="endpoint-row">
+            <div>
+                <span class="endpoint-code">{idx_ep}. {ep['endpoint_path']}</span>
+                <span class="price-tag">${ep['price_usdc']:.2f} USDC</span>
+                <span class="badge-scout" style="background:#059669;margin-left:6px;">AUTO-BYGGD ({ep['asset_symbol']})</span>
+            </div>
+            <div>Anrop: <strong>{ep['calls_count']} st</strong> | Intäkt: <strong>${ep['revenue_usdc']:.2f} USDC</strong> | Status: 🟢</div>
+        </div>
+        """
+        idx_ep += 1
+
     return f"""<!DOCTYPE html>
 <html lang="sv">
 <head>
@@ -347,6 +362,7 @@ async def overseer_dashboard(request: Request) -> str:
             </div>
             <div>Anrop: <strong>{stats['calls_premium']} st</strong> | Intäkt: <strong>${prem_rev:.2f} USDC</strong> | Status: 🟢</div>
         </div>
+        {dynamic_endpoints_html}
     </div>
 
     <div class="card">
@@ -412,6 +428,11 @@ async def overseer_dashboard(request: Request) -> str:
                 window.location.reload();
             }}
         }}
+
+        // Auto-refresh Dashboard var 30:e sekund så nya intäkter och auto-byggda tjänster syns direkt
+        setInterval(() => {{
+            window.location.reload();
+        }}, 30000);
     </script>
 </body>
 </html>"""
