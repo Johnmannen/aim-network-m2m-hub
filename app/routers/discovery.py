@@ -56,6 +56,40 @@ async def llms_txt_manifest(request: Request) -> str:
 """
 
 
+@router.get("/robots.txt", response_class=PlainTextResponse)
+async def robots_txt() -> str:
+    """Explicitly invite all AI search crawlers, M2M agents, and indexers."""
+    return """User-agent: *
+Allow: /
+Allow: /llms.txt
+Allow: /agents.json
+Allow: /.well-known/agent.json
+Allow: /openapi.json
+Allow: /api/v1/
+Sitemap: https://aim-network-m2m-hub.onrender.com/sitemap.xml
+"""
+
+
+@router.get("/sitemap.xml")
+async def sitemap_xml(request: Request):
+    """Dynamic XML sitemap for search engines and AI directory crawlers."""
+    from fastapi.responses import Response
+
+    base = "https://aim-network-m2m-hub.onrender.com"
+    urls = [
+        f"{base}/",
+        f"{base}/llms.txt",
+        f"{base}/agents.json",
+        f"{base}/.well-known/agent.json",
+        f"{base}/openapi.json",
+        f"{base}/api/v1/crypto-pulse",
+        f"{base}/api/v1/deep-market-report",
+    ]
+    xml_items = "".join(f"<url><loc>{u}</loc></url>" for u in urls)
+    xml = f'<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{xml_items}</urlset>'
+    return Response(content=xml, media_type="application/xml")
+
+
 @router.get("/agents.json", response_class=JSONResponse)
 async def agents_json_manifest(request: Request) -> dict:
     """Standardized x402 & M2M agent catalog (includes auto-deployed Scout endpoints)."""

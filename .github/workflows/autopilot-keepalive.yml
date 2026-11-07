@@ -1,0 +1,25 @@
+name: AIM Network 24/7 Keep-Alive & Autonomous Scout Autopilot
+
+on:
+  schedule:
+    # Körs var 14:e minut dygnet runt för att hålla Render Free Tier varm (<0.15s svarstid)
+    - cron: "*/14 * * * *"
+  workflow_dispatch:
+
+jobs:
+  keepalive_and_scout:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Health & Warm Market Cache
+        run: |
+          echo "Pinging AIM Network Health & Discovery Manifests..."
+          curl -fsS --max-time 25 "https://aim-network-m2m-hub.onrender.com/health"
+          echo ""
+          curl -fsS --max-time 25 "https://aim-network-m2m-hub.onrender.com/llms.txt" > /dev/null
+          curl -fsS --max-time 25 "https://aim-network-m2m-hub.onrender.com/agents.json" > /dev/null
+
+      - name: Trigger Autonomous Scout (/cron/discover)
+        run: |
+          echo "Triggering Autonomous Scout..."
+          curl -fsS -X POST --max-time 25 "https://aim-network-m2m-hub.onrender.com/cron/discover"
+          echo ""
