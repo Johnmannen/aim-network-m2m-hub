@@ -593,7 +593,10 @@ def log_traffic_event(
     else:
         category = "OTHER"
 
-    agent_label = classify_user_agent(user_agent)
+    if "simulerad test-bot" in (user_agent or "").lower():
+        agent_label = "🧪 Simulerad Test-Bot (Admin)"
+    else:
+        agent_label = classify_user_agent(user_agent)
     now_dt = datetime.now(timezone.utc)
     now_iso = now_dt.isoformat()
     retention_days = int(getattr(settings, "TRAFFIC_RETENTION_DAYS", 30))
@@ -821,3 +824,44 @@ def clear_pin_failures_db(
         else:
             conn.execute("DELETE FROM pin_failures WHERE client_ip = ?;", (client_ip,))
         conn.commit()
+
+
+def reset_simulated_purchases(db_path: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Remove all admin-simulated test purchases (verified_mode == 'admin_simulation')
+    and recalculate system_state counters from real transactions only.
+    """
+    init_db(db_path)
+    now = datetime.now(timezone.utc).isoformat()
+    with get_connection(db_path) as conn:
+        conn.execute(
+            "DELETE FROM used_transactions WHERE verified_mode = 'admin_simulation';"
+        )
+        conn.execute(
+            "DELETE FROM traffic_logs WHERE agent_type LIKE '%Simulerad Test-Bot%';"
+        )
+        micro_cnt = conn.execute(
+            """
+            SELECT COUNT(*) as c FROM used_transactions
+            WHERE amount_usdc < 0.50;
+            """
+        ).fetchone()["c"]
+        prem_cnt = conn.execute(
+            """
+            SELECT COUNT(*) as c FROM used_transactions
+            WHERE amount_usdc >= 0.50;
+            """
+        ).fetchone()["c"]
+        total_rev = conn.execute(
+            "SELECT COALESCE(SUM(amount_usdc), 0.0) as s FROM used_transactions;"
+        ).fetchone()["s"]
+        conn.execute(
+            """
+            UPDATE system_state
+            SET calls_micro = ?, calls_premium = ?, revenue_usdc = ROUND(?, 4), updated_at = ?
+            WHERE id = 1;
+            """,
+            (int(micro_cnt), int(prem_cnt), float(total_rev), now),
+        )
+        conn.commit()
+    return get_stats(db_path)

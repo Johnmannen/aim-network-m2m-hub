@@ -24,7 +24,10 @@ from app.database import (
     export_db_snapshot,
     get_stats,
     import_db_snapshot,
+     log_traffic_event,
+    record_paid_call,
     record_pin_failure_db,
+    reset_simulated_purchases,
     set_pause_state,
 )
 from app.services.market_data import (
@@ -364,6 +367,75 @@ async def run_agent_self_diagnosis(
             },
         ],
     }
+
+
+@router.post("/api/admin/simulate-purchase", response_class=JSONResponse)
+async def simulate_admin_purchase(
+    request: Request,
+    x_admin_pin: Optional[str] = Header(default=None, alias="X-Admin-Pin"),
+) -> dict:
+    """
+    Admin-only 1-click purchase simulator:
+    Records a simulated $0.01 USDC purchase on /api/v1/crypto-pulse, logs the 402 -> 200
+    conversion funnel in Traffic Radar, and returns the unlocked product payload.
+    Can be wiped anytime via POST /api/admin/reset-simulations.
+    """
+    if not has_valid_session(request):
+        verify_admin_pin_with_lockout(request, x_admin_pin)
+
+    db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
+    sim_tx_hash = f"0xsim_{secrets.token_hex(16)}"
+
+    # 1. Log simulated 402 price quote followed by 200 paid delivery in Traffic Radar
+    log_traffic_event(
+        path="/api/v1/crypto-pulse",
+        method="GET",
+        status_code=402,
+        user_agent="httpx/Simulerad Test-Bot",
+        country="SE",
+        latency_ms=14.2,
+        db_path=db_override,
+    )
+    record_paid_call(
+        tx_hash=sim_tx_hash,
+        endpoint="/api/v1/crypto-pulse",
+        amount_usdc=settings.PRICE_MICRO_DEC,
+        tier="micro",
+        payer_address="0xsim_admin_test",
+        verified_mode="admin_simulation",
+        db_path=db_override,
+    )
+    log_traffic_event(
+        path="/api/v1/crypto-pulse",
+        method="GET",
+        status_code=200,
+        user_agent="httpx/Simulerad Test-Bot",
+        country="SE",
+        latency_ms=28.5,
+        db_path=db_override,
+    )
+    product = await fetch_crypto_pulse_data()
+    return {
+        "status": "simulated_purchase_complete",
+        "tx_hash": sim_tx_hash,
+        "amount_usdc": float(settings.PRICE_MICRO_DEC),
+        "endpoint": "/api/v1/crypto-pulse",
+        "unlocked_product": product,
+    }
+
+
+@router.post("/api/admin/reset-simulations", response_class=JSONResponse)
+async def reset_admin_simulations(
+    request: Request,
+    x_admin_pin: Optional[str] = Header(default=None, alias="X-Admin-Pin"),
+) -> dict:
+    """Remove all admin-simulated test purchases so revenue counters show only real on-chain sales."""
+    if not has_valid_session(request):
+        verify_admin_pin_with_lockout(request, x_admin_pin)
+
+    db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
+    updated_stats = reset_simulated_purchases(db_override)
+    return {"status": "simulations_cleared", "stats": updated_stats}
 
 
 @router.get("/", response_class=HTMLResponse)

@@ -1,4 +1,4 @@
-﻿"""Admin endpoint protection, per-client lockout and keep-alive classification."""
+"""Admin endpoint protection, per-client lockout and keep-alive classification."""
 
 import pytest
 from fastapi.testclient import TestClient
@@ -146,3 +146,30 @@ async def test_cloud_gist_push_and_restore_roundtrip(tmp_path, monkeypatch):
     finally:
         settings.BACKUP_GIST_ID = ""
         settings.GITHUB_BACKUP_TOKEN = ""
+
+
+def test_admin_simulate_and_reset_purchase(tmp_path):
+    c = _client(tmp_path)
+    # Unauthenticated calls must fail with 401
+    assert c.post("/api/admin/simulate-purchase").status_code == 401
+    assert c.post("/api/admin/reset-simulations").status_code == 401
+
+    # Log in as admin
+    c.post("/api/admin/login", json={"pin": settings.ADMIN_PIN})
+
+    # Trigger 1-click simulated purchase
+    sim = c.post("/api/admin/simulate-purchase")
+    assert sim.status_code == 200
+    assert sim.json()["status"] == "simulated_purchase_complete"
+
+    stats_after_sim = c.get("/api/admin/stats").json()
+    assert stats_after_sim["calls_micro"] == 1
+    assert stats_after_sim["revenue_usdc"] == 0.01
+    assert stats_after_sim["traffic_telemetry"]["paid_200"] == 1
+
+    # Trigger 1-click reset of simulated purchases
+    rst = c.post("/api/admin/reset-simulations")
+    assert rst.status_code == 200
+    assert rst.json()["stats"]["calls_micro"] == 0
+    assert rst.json()["stats"]["revenue_usdc"] == 0.0
+    assert rst.json()["stats"]["traffic_telemetry"]["paid_200"] == 0
