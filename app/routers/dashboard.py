@@ -234,7 +234,62 @@ async def overseer_dashboard(request: Request) -> str:
         """
         idx_ep += 1
 
-    total_active_apis = 2 + len(stats.get("dynamic_endpoints", []))
+    total_active_apis = 3 + len(stats.get("dynamic_endpoints", []))
+    telemetry = stats.get("traffic_telemetry", {})
+    disc_hits = telemetry.get("discovery_hits", 0)
+    quotes_402 = telemetry.get("quotes_402", 0)
+    paid_200 = telemetry.get("paid_200", 0)
+    blocked_hits = telemetry.get("blocked_hits", 0)
+    conv_pct = telemetry.get("conversion_rate_pct", 0.0)
+    avg_lat = telemetry.get("avg_latency_ms", 0.0)
+    total_ext = telemetry.get("total_external_requests", 0)
+
+    agent_pills_html = ""
+    for ab in telemetry.get("agent_breakdown", []):
+        agent_pills_html += f"""
+        <span class="agent-pill">{ab['agent_type']}: <strong>{ab['cnt']}</strong></span>
+        """
+    if not agent_pills_html:
+        agent_pills_html = "<span class='agent-pill'>Väntar på första externa anropet...</span>"
+
+    stream_rows_html = ""
+    for ev in telemetry.get("recent_stream", [])[:12]:
+        ts_short = ev["created_at"][11:19] if len(ev.get("created_at", "")) >= 19 else ev.get("created_at", "")
+        cat = ev.get("category", "OTHER")
+        if cat == "PAID_200":
+            badge_cls = "b-paid"
+            badge_txt = f"💰 {ev['status_code']} BETALD"
+        elif cat == "QUOTE_402":
+            badge_cls = "b-quote"
+            badge_txt = f"🟡 {ev['status_code']} PRISOFFERT (x402)"
+        elif cat == "DISCOVERY":
+            badge_cls = "b-disc"
+            badge_txt = f"🔍 {ev['status_code']} MENY/KATALOG"
+        elif cat == "BLOCKED":
+            badge_cls = "b-block"
+            badge_txt = f"🛡️ {ev['status_code']} BLOCKERAD"
+        else:
+            badge_cls = "b-disc"
+            badge_txt = f"⚪ {ev['status_code']}"
+
+        stream_rows_html += f"""
+        <tr>
+            <td style="font-family:monospace;color:var(--muted);">{ts_short}</td>
+            <td><span class="country-tag">{ev.get('country', 'GLOBAL')}</span></td>
+            <td>{ev.get('agent_type', '')}</td>
+            <td><code class="endpoint-code">{ev.get('method', 'GET')} {ev.get('path', '')}</code></td>
+            <td><span class="stream-badge {badge_cls}">{badge_txt}</span></td>
+            <td style="font-family:monospace;text-align:right;">{ev.get('latency_ms', 0.0):.1f} ms</td>
+        </tr>
+        """
+    if not stream_rows_html:
+        stream_rows_html = """
+        <tr>
+            <td colspan="6" style="text-align:center;color:var(--muted);padding:14px;">
+                Inga externa anrop loggade ännu — klicka på /llms.txt eller /api/v1/free-teaser för att se strömmen live!
+            </td>
+        </tr>
+        """
 
     return f"""<!DOCTYPE html>
 <html lang="sv">
@@ -431,6 +486,78 @@ async def overseer_dashboard(request: Request) -> str:
             margin-top: 12px;
             display: none;
         }}
+        .funnel-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
+            gap: 12px;
+            margin-bottom: 14px;
+        }}
+        .funnel-box {{
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 12px 14px;
+        }}
+        .funnel-num {{
+            font-size: 1.55rem;
+            font-weight: 800;
+            font-family: monospace;
+            margin-top: 2px;
+        }}
+        .funnel-label {{
+            font-size: 0.76rem;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }}
+        .agent-pill {{
+            display: inline-block;
+            background: rgba(56, 189, 248, 0.1);
+            border: 1px solid rgba(56, 189, 248, 0.25);
+            color: var(--text);
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 0.78rem;
+            margin-right: 6px;
+            margin-bottom: 6px;
+        }}
+        .stream-table {{
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.8rem;
+            margin-top: 10px;
+        }}
+        .stream-table th {{
+            text-align: left;
+            color: var(--muted);
+            font-weight: 600;
+            padding: 8px 6px;
+            border-bottom: 1px solid var(--border);
+            font-size: 0.74rem;
+            text-transform: uppercase;
+        }}
+        .stream-table td {{
+            padding: 8px 6px;
+            border-bottom: 1px solid rgba(255,255,255,0.04);
+        }}
+        .stream-badge {{
+            padding: 2px 7px;
+            border-radius: 5px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            font-family: monospace;
+        }}
+        .b-paid {{ background: rgba(74, 222, 128, 0.2); color: #4ade80; }}
+        .b-quote {{ background: rgba(250, 204, 21, 0.2); color: #facc15; }}
+        .b-disc {{ background: rgba(56, 189, 248, 0.18); color: #38bdf8; }}
+        .b-block {{ background: rgba(239, 68, 68, 0.2); color: #f87171; }}
+        .country-tag {{
+            background: rgba(255,255,255,0.07);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 0.74rem;
+        }}
         .links-footer {{
             display: flex;
             gap: 16px;
@@ -463,6 +590,55 @@ async def overseer_dashboard(request: Request) -> str:
             <h2>⚡ ANROPSVOLYM (x402 M2M)</h2>
             <div class="revenue-big" style="color:#38bdf8;" id="totalCalls">{stats['calls_micro'] + stats['calls_premium']} st</div>
             <div class="revenue-sub">Mikro ($0.01): {stats['calls_micro']} st • Premium ($1.00): {stats['calls_premium']} st</div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>📡 LIVE TRAFIK- & KONVERTERINGS-RADAR (Externa AI-Botar & Besökare)</h2>
+        <div class="funnel-grid">
+            <div class="funnel-box" style="border-left: 3px solid #38bdf8;">
+                <div class="funnel-label">🔍 1. Katalog & Meny-läsningar</div>
+                <div class="funnel-num" style="color:#38bdf8;">{disc_hits} st</div>
+                <div class="revenue-sub">/llms.txt, /agents.json, /mcp & teaser</div>
+            </div>
+            <div class="funnel-box" style="border-left: 3px solid #facc15;">
+                <div class="funnel-label">🚪 2. Prisförfrågningar (402)</div>
+                <div class="funnel-num" style="color:#facc15;">{quotes_402} st</div>
+                <div class="revenue-sub">Botar som fått x402-prisförslag</div>
+            </div>
+            <div class="funnel-box" style="border-left: 3px solid #4ade80;">
+                <div class="funnel-label">💰 3. Betalda Leveranser (200)</div>
+                <div class="funnel-num" style="color:#4ade80;">{paid_200} st ({conv_pct}%)</div>
+                <div class="revenue-sub">Konverteringsgrad (402 ➔ Köp)</div>
+            </div>
+            <div class="funnel-box" style="border-left: 3px solid #a855f7;">
+                <div class="funnel-label">⚡ 4. Snitt-Svarstid & Skydd</div>
+                <div class="funnel-num" style="color:#c084fc;">{avg_lat} ms</div>
+                <div class="revenue-sub">Totalt: {total_ext} anrop • Blockerade: {blocked_hits}</div>
+            </div>
+        </div>
+
+        <div style="margin-bottom: 10px;">
+            <div class="funnel-label" style="margin-bottom:6px;">🤖 Identifierade Besökare & Bot-Typer (User-Agent Detektor):</div>
+            {agent_pills_html}
+        </div>
+
+        <div style="overflow-x:auto;">
+            <table class="stream-table">
+                <thead>
+                    <tr>
+                        <th>Tid (UTC)</th>
+                        <th>Land</th>
+                        <th>Identifierad Agent / Besökare</th>
+                        <th>Anropad Endpoint</th>
+                        <th>Händelse / Status</th>
+                        <th style="text-align:right;">Svarstid</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {stream_rows_html}
+                </tbody>
+            </table>
         </div>
     </div>
 

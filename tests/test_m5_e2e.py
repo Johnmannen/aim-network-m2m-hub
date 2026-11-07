@@ -163,3 +163,12 @@ def test_full_end_to_end_system(tmp_path: Path):
         r_vip_3 = client.get("/api/v1/crypto-pulse", headers=vip_headers)
         assert r_vip_3.status_code == 200
 
+        # 9. Verify Live Traffic & Conversion Radar telemetry
+        r_telemetry = client.get("/api/admin/stats")
+        assert r_telemetry.status_code == 200
+        tel = r_telemetry.json()["traffic_telemetry"]
+        assert tel["discovery_hits"] >= 3
+        assert tel["quotes_402"] >= 3
+        assert tel["paid_200"] >= 5
+        assert len(tel["recent_stream"]) >= 5
+

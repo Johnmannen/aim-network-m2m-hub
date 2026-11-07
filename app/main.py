@@ -16,7 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.config import settings
-from app.database import init_db
+from app.database import init_db, log_traffic_event
 from app.routers.api_v1 import router as api_v1_router
 from app.routers.dashboard import router as dashboard_router
 from app.routers.discovery import router as discovery_router
@@ -65,14 +65,32 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
     @app.middleware("http")
     async def security_and_rate_limit_middleware(request: Request, call_next):
+        t0 = time.perf_counter()
         client_ip = (
             request.headers.get("CF-Connecting-IP")
             or request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
             or (request.client.host if request.client else "unknown")
         )
+        country = request.headers.get("CF-IPCountry", "GLOBAL")
+        user_agent = request.headers.get("User-Agent", "")
+        db_override = getattr(request.app.state, "db_path", None)
+
         now = time.monotonic()
         window = [t for t in ip_hits[client_ip] if (now - t) < 60.0]
         if len(window) >= settings.RATE_LIMIT_PER_MINUTE:
+            elapsed_ms = (time.perf_counter() - t0) * 1000.0
+            try:
+                log_traffic_event(
+                    path=request.url.path,
+                    method=request.method,
+                    status_code=429,
+                    user_agent=user_agent,
+                    country=country,
+                    latency_ms=elapsed_ms,
+                    db_path=db_override,
+                )
+            except Exception:
+                pass
             return JSONResponse(
                 status_code=429,
                 content={
@@ -84,6 +102,20 @@ def create_app(db_path: str | None = None) -> FastAPI:
         ip_hits[client_ip] = window
 
         response = await call_next(request)
+        elapsed_ms = (time.perf_counter() - t0) * 1000.0
+        try:
+            log_traffic_event(
+                path=request.url.path,
+                method=request.method,
+                status_code=response.status_code,
+                user_agent=user_agent,
+                country=country,
+                latency_ms=elapsed_ms,
+                db_path=db_override,
+            )
+        except Exception:
+            pass
+
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "SAMEORIGIN"
         return response

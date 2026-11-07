@@ -98,6 +98,23 @@ def init_db(db_path: Optional[str] = None) -> None:
             """
         )
 
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS traffic_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                path TEXT NOT NULL,
+                method TEXT NOT NULL,
+                status_code INTEGER NOT NULL,
+                category TEXT NOT NULL,
+                agent_type TEXT NOT NULL,
+                country TEXT NOT NULL DEFAULT 'GLOBAL',
+                latency_ms REAL NOT NULL DEFAULT 0.0,
+                is_internal INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL
+            );
+            """
+        )
+
         now = datetime.now(timezone.utc).isoformat()
         conn.execute(
             """
@@ -145,6 +162,66 @@ def get_stats(db_path: Optional[str] = None) -> Dict[str, Any]:
             "SELECT * FROM used_transactions ORDER BY created_at DESC LIMIT 10;"
         ).fetchall()
 
+        # Traffic telemetry aggregations (excluding internal dashboard polling)
+        funnel_rows = conn.execute(
+            """
+            SELECT category, COUNT(*) as cnt
+            FROM traffic_logs
+            WHERE is_internal = 0
+            GROUP BY category;
+            """
+        ).fetchall()
+        funnel_map = {r["category"]: r["cnt"] for r in funnel_rows}
+
+        avg_lat_row = conn.execute(
+            "SELECT AVG(latency_ms) as avg_ms, COUNT(*) as total_req FROM traffic_logs WHERE is_internal = 0;"
+        ).fetchone()
+
+        agent_breakdown_rows = conn.execute(
+            """
+            SELECT agent_type, COUNT(*) as cnt
+            FROM traffic_logs
+            WHERE is_internal = 0
+            GROUP BY agent_type
+            ORDER BY cnt DESC
+            LIMIT 6;
+            """
+        ).fetchall()
+
+        endpoint_hits_rows = conn.execute(
+            """
+            SELECT path, COUNT(*) as cnt,
+                   SUM(CASE WHEN status_code = 402 THEN 1 ELSE 0 END) as quotes_402,
+                   SUM(CASE WHEN category = 'PAID_200' THEN 1 ELSE 0 END) as paid_200
+            FROM traffic_logs
+            WHERE is_internal = 0
+            GROUP BY path
+            ORDER BY cnt DESC
+            LIMIT 8;
+            """
+        ).fetchall()
+
+        recent_traffic_rows = conn.execute(
+            """
+            SELECT * FROM traffic_logs
+            WHERE is_internal = 0
+            ORDER BY id DESC
+            LIMIT 15;
+            """
+        ).fetchall()
+
+        discovery_hits = int(funnel_map.get("DISCOVERY", 0))
+        quotes_402 = int(funnel_map.get("QUOTE_402", 0))
+        paid_200 = int(funnel_map.get("PAID_200", 0))
+        blocked_hits = int(funnel_map.get("BLOCKED", 0))
+        total_external = int(avg_lat_row["total_req"] or 0)
+        avg_latency_ms = round(float(avg_lat_row["avg_ms"] or 0.0), 1)
+        conversion_pct = (
+            round((paid_200 / quotes_402) * 100.0, 1)
+            if quotes_402 > 0
+            else (100.0 if paid_200 > 0 else 0.0)
+        )
+
         return {
             "status": state_row["status"],
             "paused": bool(state_row["paused"]),
@@ -156,6 +233,18 @@ def get_stats(db_path: Optional[str] = None) -> Dict[str, Any]:
             "dynamic_endpoints": [dict(row) for row in dynamic_eps],
             "vip_passes": [dict(row) for row in vip_rows],
             "recent_transactions": [dict(row) for row in recent_txs],
+            "traffic_telemetry": {
+                "total_external_requests": total_external,
+                "discovery_hits": discovery_hits,
+                "quotes_402": quotes_402,
+                "paid_200": paid_200,
+                "blocked_hits": blocked_hits,
+                "conversion_rate_pct": conversion_pct,
+                "avg_latency_ms": avg_latency_ms,
+                "agent_breakdown": [dict(r) for r in agent_breakdown_rows],
+                "endpoint_hits": [dict(r) for r in endpoint_hits_rows],
+                "recent_stream": [dict(r) for r in recent_traffic_rows],
+            },
         }
 
 
@@ -411,6 +500,106 @@ def create_vip_pass(
             "SELECT * FROM vip_passes WHERE tx_hash = ?;", (normalized,)
         ).fetchone()
         return dict(row)
+
+
+def classify_user_agent(user_agent: str) -> str:
+    """Classify visitor into human-readable AI Bot / SDK / Crawler / Browser category."""
+    ua = (user_agent or "").lower()
+    if not ua:
+        return "🤖 Unknown M2M Agent"
+    if "gptbot" in ua or "openai" in ua or "chatgpt" in ua:
+        return "🧠 OpenAI / GPTBot"
+    if "claude" in ua or "anthropic" in ua:
+        return "🧠 Anthropic / ClaudeBot"
+    if "perplexity" in ua:
+        return "🔎 Perplexity AI Bot"
+    if "googlebot" in ua or "gemini" in ua or "google-extended" in ua:
+        return "🔎 Google / Gemini Crawler"
+    if "mcp" in ua or "smithery" in ua or "glama" in ua:
+        return "🔌 MCP Client / Directory"
+    if "httpx" in ua or "python-requests" in ua or "aiohttp" in ua:
+        return "🐍 Python AI/Trading Bot"
+    if "axios" in ua or "node" in ua or "undici" in ua or "got" in ua:
+        return "⚡ Node.js / TS Agent"
+    if "curl" in ua:
+        return "💻 CLI / Keep-Alive Ping"
+    if "mozilla" in ua or "chrome" in ua or "safari" in ua:
+        return "🌐 Web Browser (Human)"
+    return f"🤖 Custom Bot ({user_agent[:18]})"
+
+
+def log_traffic_event(
+    path: str,
+    method: str,
+    status_code: int,
+    user_agent: str = "",
+    country: str = "GLOBAL",
+    latency_ms: float = 0.0,
+    db_path: Optional[str] = None,
+) -> None:
+    """Record an HTTP request into traffic_logs with automatic funnel categorization."""
+    init_db(db_path)
+
+    # Mark dashboard polling, static icons, and health checks as internal so external radar stays clean
+    is_internal = 1 if (
+        path in ("/", "/health", "/favicon.ico")
+        or path.startswith("/api/admin")
+    ) else 0
+
+    if status_code == 402:
+        category = "QUOTE_402"
+    elif status_code in (401, 403, 429, 503):
+        category = "BLOCKED"
+    elif path.startswith("/api/v1/") and path != "/api/v1/free-teaser" and status_code == 200:
+        category = "PAID_200"
+    elif path in (
+        "/llms.txt",
+        "/agents.json",
+        "/.well-known/agent.json",
+        "/mcp",
+        "/openapi.json",
+        "/docs",
+        "/sitemap.xml",
+        "/robots.txt",
+        "/api/v1/free-teaser",
+    ):
+        category = "DISCOVERY"
+    else:
+        category = "OTHER"
+
+    agent_label = classify_user_agent(user_agent)
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    with get_connection(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO traffic_logs
+            (path, method, status_code, category, agent_type, country, latency_ms, is_internal, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+            """,
+            (
+                path,
+                method.upper(),
+                int(status_code),
+                category,
+                agent_label,
+                (country or "GLOBAL").upper()[:8],
+                round(float(latency_ms), 2),
+                is_internal,
+                now_iso,
+            ),
+        )
+        # Keep table bounded to latest 5,000 rows for ultra-fast queries on free tier
+        conn.execute(
+            """
+            DELETE FROM traffic_logs
+            WHERE id NOT IN (
+                SELECT id FROM traffic_logs ORDER BY id DESC LIMIT 5000
+            );
+            """
+        )
+        conn.commit()
+
 
 
 
