@@ -16,6 +16,8 @@ services:
         value: "strict_onchain"
       - key: TESTING
         value: "false"
+      - key: MIN_CONFIRMATIONS
+        value: "2"
       - key: TRUST_PROXY_HEADERS
         value: "true"
       - key: SCOUT_AUTOPILOT_ENABLED
@@ -24,3 +26,7 @@ services:
         value: "3600"
       - key: BASE_RPC_URL
         value: "https://mainnet.base.org"
+      - key: BACKUP_GIST_ID
+        sync: false
+      - key: GITHUB_BACKUP_TOKEN
+        sync: false

@@ -170,8 +170,15 @@ async def verify_base_usdc_transaction(
         return False, "", "Transaction failed or reverted on-chain."
 
     min_conf = int(getattr(settings, "MIN_CONFIRMATIONS", 1))
-    if receipt.get("blockNumber") and min_conf > 1:
-        tx_block = int(receipt["blockNumber"], 16)
+    if min_conf > 1:
+        raw_tx_block = receipt.get("blockNumber")
+        if not raw_tx_block:
+            return (
+                False,
+                "",
+                f"Transaction is still pending / missing blockNumber (requires >= {min_conf} confirmations).",
+            )
+        tx_block = int(raw_tx_block, 16)
         block_payload = {
             "jsonrpc": "2.0",
             "id": 2,
@@ -186,18 +193,29 @@ async def verify_base_usdc_transaction(
             else:
                 async with httpx.AsyncClient(timeout=5.0) as client:
                     b_resp = await client.post(endpoint_rpc, json=block_payload)
+            b_resp.raise_for_status()
             b_data = b_resp.json()
-            if b_data and b_data.get("result"):
-                latest_block = int(b_data["result"], 16)
-                confirmations = max(0, latest_block - tx_block + 1)
-                if confirmations < min_conf:
-                    return (
-                        False,
-                        "",
-                        f"Insufficient block confirmations ({confirmations}/{min_conf}).",
-                    )
+            if not b_data or not b_data.get("result"):
+                return (
+                    False,
+                    "",
+                    "Unable to verify block confirmations (empty eth_blockNumber response).",
+                )
+            latest_block = int(b_data["result"], 16)
+            confirmations = max(0, latest_block - tx_block + 1)
+            if confirmations < min_conf:
+                return (
+                    False,
+                    "",
+                    f"Insufficient block confirmations ({confirmations}/{min_conf}).",
+                )
         except Exception as exc:
-            logger.warning("Block confirmation check skipped: %s", exc)
+            logger.warning("Block confirmation check failed (fail-closed): %s", exc)
+            return (
+                False,
+                "",
+                f"Unable to verify block confirmations via RPC: {exc}",
+            )
 
     expected_units = to_micro_usdc(expected_amount_usdc)
     padded_recipient = "0x" + target_wallet.replace("0x", "").rjust(64, "0")

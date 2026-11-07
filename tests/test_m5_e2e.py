@@ -360,3 +360,60 @@ async def test_onchain_block_confirmations_check(monkeypatch):
         assert "Insufficient block confirmations" in reason
     finally:
         settings.MIN_CONFIRMATIONS = 1
+
+
+@pytest.mark.anyio
+async def test_onchain_block_confirmations_fail_closed_on_rpc_error(monkeypatch):
+    """When MIN_CONFIRMATIONS > 1 and eth_blockNumber fails, verification fails closed (rejects)."""
+    tx_hash = "0x" + "d" * 64
+    recipient_padded = "0x" + settings.WALLET_ADDRESS.lower().replace("0x", "").rjust(
+        64, "0"
+    )
+    payer_padded = "0x" + ("3" * 40).rjust(64, "0")
+
+    class MockResponse:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self._payload
+
+    async def mock_post(self, url, json, timeout=5.0):
+        if json.get("method") == "eth_getTransactionReceipt":
+            return MockResponse(
+                {
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": {
+                        "status": "0x1",
+                        "blockNumber": hex(100),
+                        "logs": [
+                            {
+                                "address": settings.USDC_CONTRACT_ADDRESS,
+                                "topics": [
+                                    ERC20_TRANSFER_TOPIC,
+                                    payer_padded,
+                                    recipient_padded,
+                                ],
+                                "data": hex(10000),
+                            }
+                        ],
+                    },
+                }
+            )
+        raise RuntimeError("Simulated eth_blockNumber RPC outage")
+
+    monkeypatch.setattr("httpx.AsyncClient.post", mock_post)
+
+    settings.MIN_CONFIRMATIONS = 2
+    try:
+        is_valid, _, reason = await verify_base_usdc_transaction(
+            tx_hash=tx_hash, expected_amount_usdc=0.01
+        )
+        assert is_valid is False
+        assert "Unable to verify block confirmations" in reason
+    finally:
+        settings.MIN_CONFIRMATIONS = 1
