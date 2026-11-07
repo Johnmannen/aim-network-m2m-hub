@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse, PlainTextResponse
 
 from app.config import settings
 from app.database import get_stats
+from app.routers.dashboard import verify_admin_pin_with_lockout
 from app.services.scout import run_autonomous_scout
 
 router = APIRouter(tags=["AI Discovery & Autonomous Scout"])
@@ -228,17 +229,7 @@ async def trigger_autonomous_scout(
     """
     provided = (x_scout_token or x_admin_pin or "").strip()
     if not settings.TESTING or provided:
-        valid_admin = bool(
-            provided and secrets.compare_digest(provided, settings.ADMIN_PIN)
-        )
-        valid_scout = bool(
-            provided and secrets.compare_digest(provided, settings.SCOUT_SECRET_TOKEN)
-        )
-        if not (valid_admin or valid_scout):
-            raise HTTPException(
-                status_code=401,
-                detail="Unauthorized: Valid X-Scout-Token or X-Admin-Pin header required.",
-            )
+        verify_admin_pin_with_lockout(request, provided, allow_scout_token=True)
 
     db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
     entry = await run_autonomous_scout(db_path=db_override)

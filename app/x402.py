@@ -193,8 +193,8 @@ async def verify_base_usdc_transaction(
 
 
 def _is_test_token_allowed() -> bool:
-    """Simulated test_tx_ / test_vip_ proofs are allowed ONLY in explicit test/sandbox mode."""
-    return settings.TESTING or settings.X402_VERIFY_MODE.lower() == "hybrid"
+    """Simulated test_tx_ / test_vip_ proofs are allowed ONLY when BOTH TESTING=True AND mode=='hybrid'."""
+    return settings.TESTING and settings.X402_VERIFY_MODE.lower() == "hybrid"
 
 
 async def require_x402_payment(

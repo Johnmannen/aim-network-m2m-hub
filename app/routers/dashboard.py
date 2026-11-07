@@ -40,10 +40,12 @@ _jinja_env = Environment(
 _pin_failures: dict[str, list[float]] = defaultdict(list)
 
 
-def verify_admin_pin_with_lockout(request: Request, provided_pin: Optional[str]) -> None:
+def verify_admin_pin_with_lockout(
+    request: Request, provided_pin: Optional[str], allow_scout_token: bool = False
+) -> None:
     """
-    Verify admin PIN using constant-time secrets.compare_digest and enforce
-    brute-force lockout after MAX_PIN_FAILURES within PIN_LOCKOUT_SECONDS.
+    Verify admin PIN (or optionally SCOUT_SECRET_TOKEN) using constant-time
+    secrets.compare_digest and enforce brute-force lockout after MAX_PIN_FAILURES.
     """
     client_ip = request.client.host if request.client else "unknown"
     now = time.monotonic()
@@ -59,11 +61,19 @@ def verify_admin_pin_with_lockout(request: Request, provided_pin: Optional[str])
         )
 
     clean_pin = (provided_pin or "").strip()
-    if not clean_pin or not secrets.compare_digest(clean_pin, settings.ADMIN_PIN):
+    is_valid_admin = bool(
+        clean_pin and secrets.compare_digest(clean_pin, settings.ADMIN_PIN)
+    )
+    is_valid_scout = bool(
+        allow_scout_token
+        and clean_pin
+        and secrets.compare_digest(clean_pin, settings.SCOUT_SECRET_TOKEN)
+    )
+    if not (is_valid_admin or is_valid_scout):
         _pin_failures[client_ip].append(now)
         raise HTTPException(
             status_code=401,
-            detail="Ogiltig eller saknad Admin PIN-kod.",
+            detail="Ogiltig eller saknad Admin PIN-kod / Token.",
         )
 
     # Clear failure counter on success
@@ -141,12 +151,18 @@ async def toggle_verify_mode(
 
 
 @router.get("/api/admin/backup-snapshot", response_class=JSONResponse)
-async def get_backup_snapshot(request: Request) -> dict:
+async def get_backup_snapshot(
+    request: Request,
+    x_admin_pin: Optional[str] = Header(default=None, alias="X-Admin-Pin"),
+    x_scout_token: Optional[str] = Header(default=None, alias="X-Scout-Token"),
+) -> dict:
     """
     Export non-sensitive SQLite telemetry & state snapshot so the GitHub Gist
     cloud backup can persist traffic, discoveries, dynamic endpoints, and used tx hashes
-    across Render Free Tier container restarts.
+    across Render Free Tier container restarts. Protected by X-Scout-Token or X-Admin-Pin.
     """
+    provided = (x_scout_token or x_admin_pin or "").strip()
+    verify_admin_pin_with_lockout(request, provided, allow_scout_token=True)
     db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
     return export_db_snapshot(db_override)
 
@@ -160,7 +176,7 @@ async def restore_backup_snapshot(
 ) -> dict:
     """Restore/merge SQLite snapshot if container restarted (requires auth token)."""
     provided = (x_scout_token or x_admin_pin or "").strip()
-    verify_admin_pin_with_lockout(request, provided)
+    verify_admin_pin_with_lockout(request, provided, allow_scout_token=True)
     db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
     updated_stats = import_db_snapshot(snapshot, db_override)
     return {"status": "restored", "stats": updated_stats}

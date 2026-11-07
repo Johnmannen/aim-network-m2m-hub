@@ -7,6 +7,8 @@ Validates the entire lifecycle:
 4. Revenue accounting across Micro ($0.01) and Premium ($1.00) endpoints
 5. PIN-protected Emergency Stop (HTTP 401 on wrong PIN, HTTP 503 when paused, HTTP 200 when resumed)
 6. Autonomous Scout (/cron/discover)
+7. Production-mode test-token rejection (TESTING=False blocks test_tx_ even if mode=='hybrid')
+8. Auth-protected /api/admin/backup-snapshot with payer_address redaction
 """
 
 from pathlib import Path
@@ -172,7 +174,33 @@ def test_full_end_to_end_system(tmp_path: Path):
         assert tel["paid_200"] >= 5
         assert len(tel["recent_stream"]) >= 5
 
-        # 10. Verify /cron/discover rejects invalid X-Scout-Token header (401)
+        # 10. Verify /api/admin/backup-snapshot requires auth & redacts payer_address
+        r_snap_unauth = client.get("/api/admin/backup-snapshot")
+        assert r_snap_unauth.status_code == 401
+
+        r_snap_auth = client.get(
+            "/api/admin/backup-snapshot",
+            headers={"X-Scout-Token": settings.SCOUT_SECRET_TOKEN},
+        )
+        assert r_snap_auth.status_code == 200
+        snap_data = r_snap_auth.json()
+        assert len(snap_data["used_transactions"]) >= 3
+        for tx_row in snap_data["used_transactions"]:
+            assert tx_row["payer_address"] == "redacted"
+
+        # 11. Verify production-mode test token rejection (TESTING=False blocks test_tx_ even in hybrid)
+        settings.TESTING = False
+        settings.X402_VERIFY_MODE = "hybrid"
+        try:
+            r_prod_reject = client.get(
+                "/api/v1/crypto-pulse",
+                headers={"X-PAYMENT-PROOF": "test_tx_should_be_rejected_in_prod"},
+            )
+            assert r_prod_reject.status_code == 402
+        finally:
+            settings.TESTING = True
+
+        # 12. Verify /cron/discover rejects invalid X-Scout-Token header (401)
         r_scout_bad = client.post(
             "/cron/discover", headers={"X-Scout-Token": "invalid_secret"}
         )
@@ -183,7 +211,7 @@ def test_full_end_to_end_system(tmp_path: Path):
         )
         assert r_scout_good.status_code == 200
 
-        # 11. Verify PIN brute-force lockout after MAX_PIN_FAILURES (5 attempts -> 429)
+        # 13. Verify PIN brute-force lockout after MAX_PIN_FAILURES (5 attempts -> 429)
         for _ in range(settings.MAX_PIN_FAILURES):
             r_fail = client.post("/api/admin/toggle-pause", json={"pin": "wrong"})
             assert r_fail.status_code == 401
@@ -192,4 +220,3 @@ def test_full_end_to_end_system(tmp_path: Path):
             "/api/admin/toggle-pause", json={"pin": settings.ADMIN_PIN}
         )
         assert r_locked.status_code == 429
-

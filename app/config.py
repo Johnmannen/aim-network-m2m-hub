@@ -12,8 +12,9 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
-# Ephemeral fallback token generated per process if ADMIN_PIN is not set in env
+# Ephemeral fallback tokens generated per process if not set in env (distinct for Admin vs Scout)
 _GENERATED_FALLBACK_PIN = secrets.token_urlsafe(24)
+_GENERATED_FALLBACK_SCOUT = secrets.token_urlsafe(24)
 
 
 class Settings:
@@ -30,9 +31,11 @@ class Settings:
         "WALLET_ADDRESS", "0x1bbae07abebbb61f611391e02e81ee26b0c47b79"
     )
 
-    # Admin security token/PIN for Emergency Stop & manual triggers (never hardcoded in repo)
+    # Admin security token/PIN & separate Scout/Backup token (never hardcoded in repo)
     ADMIN_PIN: str = os.getenv("ADMIN_PIN", "") or _GENERATED_FALLBACK_PIN
-    SCOUT_SECRET_TOKEN: str = os.getenv("SCOUT_SECRET_TOKEN", "") or ADMIN_PIN
+    SCOUT_SECRET_TOKEN: str = (
+        os.getenv("SCOUT_SECRET_TOKEN", "") or _GENERATED_FALLBACK_SCOUT
+    )
 
     # Production default is ALWAYS "strict_onchain".
     # Simulated `test_tx_` tokens are only accepted when TESTING=true AND X402_VERIFY_MODE=hybrid.
@@ -81,13 +84,11 @@ class Settings:
         os.getenv("SCOUT_AUTOPILOT_ENABLED", "true").lower() == "true"
     )
 
-    # SQLite database path & Automatic Cloud Backup Gist
+    # SQLite database path & Automatic Cloud Backup Gist (configured via env)
     DATABASE_PATH: str = os.getenv(
         "DATABASE_PATH", str(BASE_DIR / "data" / "aim_network.db")
     )
-    BACKUP_GIST_ID: str = os.getenv(
-        "BACKUP_GIST_ID", "5a21a4697eacdb1311972b0a8c24e314"
-    )
+    BACKUP_GIST_ID: str = os.getenv("BACKUP_GIST_ID", "")
     GITHUB_BACKUP_TOKEN: str = os.getenv("GITHUB_BACKUP_TOKEN", "")
 
 

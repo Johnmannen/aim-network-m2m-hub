@@ -78,3 +78,4 @@ async def push_to_cloud_gist(db_path: Optional[str] = None) -> bool:
     except Exception as exc:
         logger.warning("Cloud Gist backup push failed: %s", exc)
         return False
+

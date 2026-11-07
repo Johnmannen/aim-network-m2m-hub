@@ -25,3 +25,4 @@ def reset_pin_lockout_between_tests():
     settings.X402_VERIFY_MODE = "hybrid"
     yield
     _pin_failures.clear()
+

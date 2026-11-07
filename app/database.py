@@ -4,12 +4,15 @@ Handles persistent storage of:
 - System state (ONLINE / PAUSED, call counters, USDC revenue)
 - Used transaction hashes (Replay attack protection for x402 payments)
 - Autonomous Scout discovery logs (New M2M API opportunities)
+- Dynamic endpoints auto-deployed by the Scout
+- 24h VIP Passes & Traffic/Conversion Radar telemetry
 """
 
 import sqlite3
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from app.config import settings
 
@@ -124,7 +127,6 @@ def init_db(db_path: Optional[str] = None) -> None:
             (now,),
         )
 
-        # Seed an initial discovery log if empty so Dashboard immediately looks rich
         cur = conn.execute("SELECT COUNT(*) as cnt FROM discovery_logs;")
         if cur.fetchone()["cnt"] == 0:
             conn.execute(
@@ -145,7 +147,7 @@ def init_db(db_path: Optional[str] = None) -> None:
 
 
 def get_stats(db_path: Optional[str] = None) -> Dict[str, Any]:
-    """Return current system status, counters, recent transactions, and scout logs."""
+    """Return current system status, counters, recent transactions, scout logs, and traffic telemetry."""
     init_db(db_path)
     with get_connection(db_path) as conn:
         state_row = conn.execute("SELECT * FROM system_state WHERE id = 1;").fetchone()
@@ -162,7 +164,6 @@ def get_stats(db_path: Optional[str] = None) -> Dict[str, Any]:
             "SELECT * FROM used_transactions ORDER BY created_at DESC LIMIT 10;"
         ).fetchall()
 
-        # Traffic telemetry aggregations (excluding internal dashboard polling)
         funnel_rows = conn.execute(
             """
             SELECT category, COUNT(*) as cnt
@@ -262,10 +263,10 @@ def is_tx_used(tx_hash: str, db_path: Optional[str] = None) -> bool:
 def record_paid_call(
     tx_hash: str,
     endpoint: str,
-    amount_usdc: float,
+    amount_usdc: float | Decimal,
     tier: str = "micro",
     payer_address: str = "unknown",
-    verified_mode: str = "hybrid",
+    verified_mode: str = "onchain",
     db_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
@@ -275,6 +276,7 @@ def record_paid_call(
     init_db(db_path)
     normalized = tx_hash.strip().lower()
     now = datetime.now(timezone.utc).isoformat()
+    clean_amount = float(Decimal(str(amount_usdc)))
 
     with get_connection(db_path) as conn:
         try:
@@ -283,33 +285,29 @@ def record_paid_call(
                 INSERT INTO used_transactions (tx_hash, endpoint, amount_usdc, payer_address, verified_mode, created_at)
                 VALUES (?, ?, ?, ?, ?, ?);
                 """,
-                (normalized, endpoint, amount_usdc, payer_address, verified_mode, now),
+                (
+                    normalized,
+                    endpoint,
+                    clean_amount,
+                    payer_address,
+                    verified_mode,
+                    now,
+                ),
             )
         except sqlite3.IntegrityError as exc:
             raise ValueError(f"Transaction hash already used: {normalized}") from exc
 
-        if tier == "premium":
-            conn.execute(
-                """
-                UPDATE system_state
-                SET calls_premium = calls_premium + 1,
-                    revenue_usdc = ROUND(revenue_usdc + ?, 4),
-                    updated_at = ?
-                WHERE id = 1;
-                """,
-                (amount_usdc, now),
-            )
-        else:
-            conn.execute(
-                """
-                UPDATE system_state
-                SET calls_micro = calls_micro + 1,
-                    revenue_usdc = ROUND(revenue_usdc + ?, 4),
-                    updated_at = ?
-                WHERE id = 1;
-                """,
-                (amount_usdc, now),
-            )
+        col = "calls_premium" if tier == "premium" else "calls_micro"
+        conn.execute(
+            f"""
+            UPDATE system_state
+            SET {col} = {col} + 1,
+                revenue_usdc = ROUND(revenue_usdc + ?, 4),
+                updated_at = ?
+            WHERE id = 1;
+            """,
+            (clean_amount, now),
+        )
         conn.commit()
 
     return get_stats(db_path)
@@ -336,7 +334,7 @@ def set_pause_state(paused: bool, db_path: Optional[str] = None) -> Dict[str, An
 def add_discovery_log(
     topic: str,
     suggested_endpoint: str,
-    suggested_price_usdc: float,
+    suggested_price_usdc: float | Decimal,
     rationale: str,
     status: str = "QUEUED_FOR_AUTOPILOT",
     db_path: Optional[str] = None,
@@ -344,13 +342,14 @@ def add_discovery_log(
     """Insert a new autonomous scout API suggestion."""
     init_db(db_path)
     now = datetime.now(timezone.utc).isoformat()
+    clean_price = float(Decimal(str(suggested_price_usdc)))
     with get_connection(db_path) as conn:
         cur = conn.execute(
             """
             INSERT INTO discovery_logs (topic, suggested_endpoint, suggested_price_usdc, rationale, status, created_at)
             VALUES (?, ?, ?, ?, ?, ?);
             """,
-            (topic, suggested_endpoint, suggested_price_usdc, rationale, status, now),
+            (topic, suggested_endpoint, clean_price, rationale, status, now),
         )
         conn.commit()
         row_id = cur.lastrowid
@@ -365,7 +364,7 @@ def register_dynamic_endpoint(
     asset_name: str,
     asset_symbol: str,
     coingecko_id: str,
-    price_usdc: float = 0.05,
+    price_usdc: float | Decimal = Decimal("0.05"),
     db_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Register or return an auto-built dynamic M2M endpoint."""
@@ -373,6 +372,7 @@ def register_dynamic_endpoint(
     clean_slug = slug.lower().strip()
     endpoint_path = f"/api/v1/trending/{clean_slug}"
     now = datetime.now(timezone.utc).isoformat()
+    clean_price = float(Decimal(str(price_usdc)))
     with get_connection(db_path) as conn:
         conn.execute(
             """
@@ -380,7 +380,15 @@ def register_dynamic_endpoint(
             (slug, endpoint_path, asset_name, asset_symbol, coingecko_id, price_usdc, calls_count, revenue_usdc, created_at)
             VALUES (?, ?, ?, ?, ?, ?, 0, 0.0, ?);
             """,
-            (clean_slug, endpoint_path, asset_name, asset_symbol, coingecko_id, price_usdc, now),
+            (
+                clean_slug,
+                endpoint_path,
+                asset_name,
+                asset_symbol,
+                coingecko_id,
+                clean_price,
+                now,
+            ),
         )
         conn.commit()
         row = conn.execute(
@@ -390,10 +398,11 @@ def register_dynamic_endpoint(
 
 
 def increment_dynamic_endpoint_stats(
-    slug: str, amount_usdc: float, db_path: Optional[str] = None
+    slug: str, amount_usdc: float | Decimal, db_path: Optional[str] = None
 ) -> None:
     """Increment call counter and revenue on a specific dynamic endpoint."""
     init_db(db_path)
+    clean_amount = float(Decimal(str(amount_usdc)))
     with get_connection(db_path) as conn:
         conn.execute(
             """
@@ -402,7 +411,7 @@ def increment_dynamic_endpoint_stats(
                 revenue_usdc = ROUND(revenue_usdc + ?, 4)
             WHERE slug = ?;
             """,
-            (amount_usdc, slug.lower().strip()),
+            (clean_amount, slug.lower().strip()),
         )
         conn.commit()
 
@@ -431,11 +440,7 @@ def check_and_use_vip_pass(
             return None
 
         conn.execute(
-            """
-            UPDATE vip_passes
-            SET calls_used = calls_used + 1
-            WHERE tx_hash = ?;
-            """,
+            "UPDATE vip_passes SET calls_used = calls_used + 1 WHERE tx_hash = ?;",
             (normalized,),
         )
         col = "calls_premium" if tier == "premium" else "calls_micro"
@@ -452,14 +457,15 @@ def check_and_use_vip_pass(
 
 def create_vip_pass(
     tx_hash: str,
-    amount_usdc: float,
+    amount_usdc: float | Decimal,
     payer_address: str = "unknown",
     tier: str = "premium",
-    verified_mode: str = "hybrid",
+    verified_mode: str = "onchain_vip",
     db_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Create a 24h VIP Pass (up to 1,000 calls across all endpoints) and record initial revenue.
+    Raises ValueError if tx_hash was already redeemed.
     """
     init_db(db_path)
     normalized = tx_hash.strip().lower()
@@ -468,11 +474,12 @@ def create_vip_pass(
     expires_iso = (
         now_dt + timedelta(hours=settings.VIP_PASS_DURATION_HOURS)
     ).isoformat()
+    clean_amount = float(Decimal(str(amount_usdc)))
 
     record_paid_call(
         tx_hash=normalized,
         endpoint="/api/v1/vip-24h-pass",
-        amount_usdc=amount_usdc,
+        amount_usdc=clean_amount,
         tier=tier,
         payer_address=payer_address,
         verified_mode=verified_mode,
@@ -489,7 +496,7 @@ def create_vip_pass(
             (
                 normalized,
                 payer_address,
-                amount_usdc,
+                clean_amount,
                 settings.VIP_PASS_MAX_CALLS,
                 expires_iso,
                 now_iso,
@@ -540,22 +547,30 @@ def log_traffic_event(
     """Record an HTTP request into traffic_logs with automatic funnel categorization."""
     init_db(db_path)
 
-    # Mark dashboard polling, static icons, and health checks as internal so external radar stays clean
-    is_internal = 1 if (
-        path in ("/", "/health", "/favicon.ico")
-        or path.startswith("/api/admin")
-    ) else 0
+    is_internal = (
+        1
+        if (
+            path in ("/", "/health", "/favicon.ico")
+            or path.startswith("/api/admin")
+        )
+        else 0
+    )
 
     if status_code == 402:
         category = "QUOTE_402"
     elif status_code in (401, 403, 429, 503):
         category = "BLOCKED"
-    elif path.startswith("/api/v1/") and path != "/api/v1/free-teaser" and status_code == 200:
+    elif (
+        path.startswith("/api/v1/")
+        and path != "/api/v1/free-teaser"
+        and status_code == 200
+    ):
         category = "PAID_200"
     elif path in (
         "/llms.txt",
         "/agents.json",
         "/.well-known/agent.json",
+        "/.well-known/glama.json",
         "/mcp",
         "/openapi.json",
         "/docs",
@@ -589,7 +604,6 @@ def log_traffic_event(
                 now_iso,
             ),
         )
-        # Keep table bounded to latest 5,000 rows for ultra-fast queries on free tier
         conn.execute(
             """
             DELETE FROM traffic_logs
@@ -602,7 +616,11 @@ def log_traffic_event(
 
 
 def export_db_snapshot(db_path: Optional[str] = None) -> Dict[str, Any]:
-    """Export all SQLite tables as a JSON-serializable snapshot for persistent cloud backup."""
+    """
+    Export SQLite state for persistent cloud backup.
+    Includes used_transactions (replay protection), vip_passes, dynamic_endpoints,
+    discovery_logs, and anonymized traffic_logs.
+    """
     init_db(db_path)
     with get_connection(db_path) as conn:
         state_row = conn.execute("SELECT * FROM system_state WHERE id = 1;").fetchone()
@@ -615,13 +633,17 @@ def export_db_snapshot(db_path: Optional[str] = None) -> Dict[str, Any]:
         ).fetchall()
 
         return {
-            "snapshot_version": "1.0",
+            "snapshot_version": "1.1",
             "exported_at": datetime.now(timezone.utc).isoformat(),
             "system_state": dict(state_row) if state_row else {},
-            "used_transactions": [dict(r) for r in used_txs],
+            "used_transactions": [
+                {**dict(r), "payer_address": "redacted"} for r in used_txs
+            ],
             "discovery_logs": [dict(r) for r in discoveries],
             "dynamic_endpoints": [dict(r) for r in dyn_eps],
-            "vip_passes": [dict(r) for r in vip_rows],
+            "vip_passes": [
+                {**dict(r), "payer_address": "redacted"} for r in vip_rows
+            ],
             "traffic_logs": [dict(r) for r in reversed(traffic_rows)],
         }
 
@@ -630,9 +652,8 @@ def import_db_snapshot(
     snapshot: Dict[str, Any], db_path: Optional[str] = None
 ) -> Dict[str, Any]:
     """
-    Merge a cloud backup snapshot into SQLite (idempotent).
-    Restores revenue, call counts, used transactions, VIP passes, dynamic endpoints, and traffic logs
-    if the container was restarted on Render Free Tier.
+    Idempotently merge a cloud backup snapshot into SQLite on container startup.
+    Never deletes existing rows; only inserts missing transactions, endpoints, and logs.
     """
     init_db(db_path)
     with get_connection(db_path) as conn:
@@ -668,7 +689,7 @@ def import_db_snapshot(
                     tx["tx_hash"],
                     tx["endpoint"],
                     tx["amount_usdc"],
-                    tx.get("payer_address", "unknown"),
+                    tx.get("payer_address", "redacted"),
                     tx.get("verified_mode", "onchain"),
                     tx["created_at"],
                 ),
@@ -703,7 +724,7 @@ def import_db_snapshot(
                 """,
                 (
                     vp["tx_hash"],
-                    vp.get("payer_address", "unknown"),
+                    vp.get("payer_address", "redacted"),
                     vp["amount_usdc"],
                     vp.get("calls_used", 0),
                     vp.get("max_calls", 1000),
@@ -716,8 +737,7 @@ def import_db_snapshot(
             "SELECT COUNT(*) as c FROM traffic_logs WHERE is_internal = 0;"
         ).fetchone()["c"]
         snap_traffic = snapshot.get("traffic_logs", [])
-        if cur_cnt < len(snap_traffic):
-            conn.execute("DELETE FROM traffic_logs;")
+        if cur_cnt == 0 and snap_traffic:
             for tr in snap_traffic:
                 conn.execute(
                     """
@@ -739,7 +759,3 @@ def import_db_snapshot(
                 )
         conn.commit()
     return get_stats(db_path)
-
-
-
-
