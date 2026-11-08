@@ -142,6 +142,10 @@ def create_app(db_path: str | None = None) -> FastAPI:
         except Exception as exc:
             logger.warning("Traffic logging failed: %s", exc)
 
+        receipt = getattr(request.state, "x402_receipt", None)
+        if receipt:
+            response.headers["X-PAYMENT-RESPONSE"] = receipt
+            response.headers["PAYMENT-RESPONSE"] = receipt
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "SAMEORIGIN"
         return response
@@ -150,7 +154,15 @@ def create_app(db_path: str | None = None) -> FastAPI:
         CORSMiddleware,
         allow_origins=["*"],
         allow_methods=["GET", "POST", "OPTIONS"],
-        allow_headers=["Content-Type", "X-PAYMENT-PROOF", "X-Admin-Pin", "X-Scout-Token"],
+        allow_headers=[
+            "Content-Type",
+            "X-PAYMENT-PROOF",
+            "X-PAYMENT",
+            "PAYMENT-SIGNATURE",
+            "X-Admin-Pin",
+            "X-Scout-Token",
+        ],
+        expose_headers=["X-PAYMENT-RESPONSE", "PAYMENT-RESPONSE", "PAYMENT-REQUIRED"],
     )
 
     app.include_router(dashboard_router)

@@ -9,6 +9,7 @@ Implements:
 """
 
 import asyncio
+import functools
 import logging
 import re
 from decimal import Decimal, ROUND_HALF_UP
@@ -17,6 +18,7 @@ import httpx
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from app import x402_standard
 from app.config import settings
 from app.database import (
     check_and_use_vip_pass,
@@ -51,6 +53,7 @@ def build_402_response(
     error_message: str = "Payment Required",
     status_code: int = 402,
     sample_teaser: Optional[Dict[str, Any]] = None,
+    resource_url: str = "",
 ) -> JSONResponse:
     """Build standard x402 v1.0 machine-readable payment requirement response with live teaser."""
     price_str = f"{Decimal(str(price_usdc)):.2f}"
@@ -64,41 +67,44 @@ def build_402_response(
             "Base L2 DEX Whale Liquidity & Actionable Signals",
         ],
     }
-    return JSONResponse(
-        status_code=status_code,
-        headers={
-            "X-Payment-Version": "x402/1.0",
-            "X-Payment-Network": "base-mainnet",
-            "X-Payment-Token": "USDC",
-            "X-Payment-Amount": price_str,
-            "X-Payment-Recipient": settings.WALLET_ADDRESS,
-        },
-        content={
-            "error": error_message,
-            "x402_version": "1.0",
-            "payment_details": {
-                "network": "base-mainnet",
-                "chain_id": settings.BASE_CHAIN_ID,
-                "token": "USDC",
-                "token_contract": settings.USDC_CONTRACT_ADDRESS,
-                "amount": price_str,
-                "recipient": settings.WALLET_ADDRESS,
-                "description": description,
-                "vip_24h_pass_option": {
-                    "amount": vip_str,
-                    "description": (
-                        f"Pay {vip_str} USDC once to unlock a 24-hour VIP Pass "
-                        f"({settings.VIP_PASS_MAX_CALLS} calls across ALL endpoints using the same tx_hash)."
-                    ),
-                },
+    headers = {
+        "X-Payment-Version": "x402/1.0",
+        "X-Payment-Network": "base-mainnet",
+        "X-Payment-Token": "USDC",
+        "X-Payment-Amount": price_str,
+        "X-Payment-Recipient": settings.WALLET_ADDRESS,
+    }
+    content = {
+        "error": error_message,
+        "x402_version": "1.0",
+        "payment_details": {
+            "network": "base-mainnet",
+            "chain_id": settings.BASE_CHAIN_ID,
+            "token": "USDC",
+            "token_contract": settings.USDC_CONTRACT_ADDRESS,
+            "amount": price_str,
+            "recipient": settings.WALLET_ADDRESS,
+            "description": description,
+            "vip_24h_pass_option": {
+                "amount": vip_str,
+                "description": (
+                    f"Pay {vip_str} USDC once to unlock a 24-hour VIP Pass "
+                    f"({settings.VIP_PASS_MAX_CALLS} calls across ALL endpoints using the same tx_hash)."
+                ),
             },
-            "free_live_teaser": teaser,
-            "instructions": (
-                "Sign USDC transfer on Base (Chain ID 8453) to recipient address "
-                "and retry request with transaction hash in X-PAYMENT-PROOF header."
-            ),
         },
-    )
+        "free_live_teaser": teaser,
+        "instructions": (
+            "Sign USDC transfer on Base (Chain ID 8453) to recipient address "
+            "and retry request with transaction hash in X-PAYMENT-PROOF header."
+        ),
+    }
+    if x402_standard.is_enabled():
+        content.update(x402_standard.v1_body_fields(price_usdc, description, resource_url))
+        headers["PAYMENT-REQUIRED"] = x402_standard.payment_required_header(
+            price_usdc, description, resource_url
+        )
+    return JSONResponse(status_code=status_code, headers=headers, content=content)
 
 
 async def verify_base_usdc_transaction(
@@ -265,9 +271,58 @@ async def require_x402_payment(
             detail="Service paused by Overseer Emergency Stop.",
         )
 
+    resource_url = str(request.url)
+    _quote = functools.partial(build_402_response, resource_url=resource_url)
     payment_proof = request.headers.get("X-PAYMENT-PROOF", "").strip()
+
+    # Standard x402: signed EIP-3009 payload in X-PAYMENT (v1) / PAYMENT-SIGNATURE (v2)
+    std_header = (
+        request.headers.get("X-PAYMENT") or request.headers.get("PAYMENT-SIGNATURE") or ""
+    ).strip()
+    if std_header and not payment_proof:
+        if not x402_standard.is_enabled():
+            return _quote(
+                price_usdc,
+                description,
+                error_message="Standard x402 payments are not enabled on this server.",
+            )
+        payload = x402_standard.decode_payment_header(std_header)
+        if payload is None:
+            return _quote(
+                price_usdc,
+                description,
+                error_message="Invalid payment header (expected base64-encoded JSON).",
+            )
+        ok, tx, payer, network, reason = await x402_standard.verify_and_settle(
+            payload,
+            price_usdc,
+            description,
+            resource_url,
+            client=getattr(request.app.state, "http_client", None),
+        )
+        if not ok:
+            return _quote(
+                price_usdc, description, error_message=f"Payment verification failed: {reason}"
+            )
+        try:
+            record_paid_call(
+                tx_hash=tx,
+                endpoint=request.url.path,
+                amount_usdc=float(Decimal(str(price_usdc))),
+                tier=tier,
+                payer_address=payer,
+                verified_mode="x402_facilitator",
+                db_path=db_path,
+            )
+        except ValueError:
+            logger.error("Settled x402 tx %s was already recorded; serving anyway.", tx)
+        if not settings.TESTING:
+            asyncio.create_task(push_to_cloud_gist(db_path=db_path))
+        request.state.x402_receipt = x402_standard.encode_receipt(tx, network, payer)
+        return None
+
     if not payment_proof:
-        return build_402_response(price_usdc, description)
+        return _quote(price_usdc, description)
 
     # 1. Check if payment_proof is an active 24h VIP Pass
     vip_entry = check_and_use_vip_pass(payment_proof, tier=tier, db_path=db_path)
@@ -283,7 +338,7 @@ async def require_x402_payment(
         ("test_tx_", "test_vip_")
     ):
         if len(payment_proof) < 12:
-            return build_402_response(
+            return _quote(
                 price_usdc,
                 description,
                 error_message="Invalid test payment proof token.",
@@ -301,7 +356,7 @@ async def require_x402_payment(
                 )
                 return None
             except ValueError:
-                return build_402_response(
+                return _quote(
                     price_usdc,
                     description,
                     error_message="VIP pass expired or call quota exhausted.",
@@ -327,7 +382,7 @@ async def require_x402_payment(
                     asyncio.create_task(push_to_cloud_gist(db_path=db_path))
                 return None
             except ValueError:
-                return build_402_response(
+                return _quote(
                     price_usdc,
                     description,
                     error_message="VIP pass expired or call quota exhausted.",
@@ -339,7 +394,7 @@ async def require_x402_payment(
             http_client=shared_client,
         )
         if not is_valid:
-            return build_402_response(
+            return _quote(
                 price_usdc,
                 description,
                 error_message=f"Payment verification failed: {reason}",
@@ -360,7 +415,7 @@ async def require_x402_payment(
         if not settings.TESTING:
             asyncio.create_task(push_to_cloud_gist(db_path=db_path))
     except ValueError:
-        return build_402_response(
+        return _quote(
             price_usdc,
             description,
             error_message="Payment proof transaction hash has already been used (Replay rejected). Tip: Send 2.00 USDC for a 24h multi-call VIP Pass.",

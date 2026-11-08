@@ -40,6 +40,15 @@ async def llms_txt_manifest(request: Request) -> str:
         )
         idx += 1
 
+    std_x402_note = (
+        "- **Standard x402 (recommended):** the 402 response contains an `accepts` list "
+        "(scheme `exact`, network `base`, EIP-3009 USDC). Retry with a signed payload in the "
+        "`X-PAYMENT` header (v2: `PAYMENT-SIGNATURE`); settlement receipt is returned in "
+        "`X-PAYMENT-RESPONSE`. Works with standard x402 client libraries.\n"
+        if settings.X402_FACILITATOR_URL
+        else ""
+    )
+
     return f"""# AIM Network — Autonomous M2M API Hub
 > Ultra-fast (<150ms cached) machine-payable data endpoints via HTTP 402 (x402 protocol) on Base Mainnet (Chain ID 8453).
 > No account or API key required. Pay per call in USDC on Base and pass transaction hash in `X-PAYMENT-PROOF` header.
@@ -49,7 +58,7 @@ async def llms_txt_manifest(request: Request) -> str:
 - **Token:** `USDC` (`{settings.USDC_CONTRACT_ADDRESS}`)
 - **Recipient Wallet:** `{settings.WALLET_ADDRESS}`
 - **Proof Header:** `X-PAYMENT-PROOF: <0x_base_transaction_hash>`
-
+{std_x402_note}
 ## Available M2M Endpoints
 0. `GET /api/v1/free-teaser`
    - **Price:** `0.00 USDC (FREE)`

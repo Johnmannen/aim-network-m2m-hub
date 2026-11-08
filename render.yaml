@@ -32,3 +32,5 @@ services:
         sync: false
       - key: GITHUB_BACKUP_TOKEN
         sync: false
+      - key: X402_FACILITATOR_URL
+        value: "https://facilitator.payai.network"

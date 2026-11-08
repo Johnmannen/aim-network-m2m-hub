@@ -69,6 +69,10 @@ class Settings:
     PIN_LOCKOUT_SECONDS: int = 900  # 15 minutes
     MIN_CONFIRMATIONS: int = int(os.getenv("MIN_CONFIRMATIONS", "1"))
 
+    # Standard x402 (EIP-3009 via facilitator). Empty URL = standard flow disabled.
+    X402_FACILITATOR_URL: str = os.getenv("X402_FACILITATOR_URL", "").strip()
+    X402_FACILITATOR_AUTH: str = os.getenv("X402_FACILITATOR_AUTH", "").strip()
+
     # Pricing tiers in USDC (Decimal-safe)
     PRICE_MICRO_DEC: Decimal = Decimal("0.01")
     PRICE_DYNAMIC_DEC: Decimal = Decimal("0.05")
