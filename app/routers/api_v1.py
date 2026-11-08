@@ -145,14 +145,39 @@ async def get_base_dex_radar(request: Request):
     if _is_sample_request(request):
         if request.method == "HEAD":
             return Response(status_code=200, media_type="application/json")
-        data = await fetch_base_dex_radar()
+        sample_payload = {
+            "timestamp": "2026-01-01T00:00:00Z",
+            "tier": "base_dex_radar_0.05_usdc",
+            "network": "base-mainnet",
+            "source_status": "SCHEMA_TEMPLATE_PREVIEW",
+            "top_base_pools": [
+                {
+                    "pair": "SAMPLE / USDC",
+                    "dex": "Aerodrome",
+                    "pair_address": "0x0000000000000000000000000000000000000000",
+                    "price_usd": 0.0,
+                    "volume_24h_usd": 0.0,
+                    "liquidity_usd": 0.0,
+                    "price_change_h24_pct": 0.0,
+                    "whale_flow_signal": "SAMPLE_SIGNAL",
+                }
+            ],
+            "summary": "Tracking Base L2 liquidity pools (Schema Template).",
+            "meta": {
+                "sources": ["schema_template"],
+                "as_of": "2026-01-01T00:00:00Z",
+                "status": "SCHEMA_TEMPLATE_ONLY",
+                "disclaimer": "Structure template only. Live real-time data unlocked via 0.05 USDC x402 payment.",
+            },
+            "cache_hit": False,
+        }
         return {
             "status": "SAMPLE_DATA_VERIFIED",
             "sample_mode": True,
             "sample_notice": "SAMPLE ONLY: Live DEX whale radar requires 0.05 USDC via x402 on Base.",
             "feed": "/api/v1/base-dex-radar",
             "live_price_usdc": settings.PRICE_DEX_RADAR_USDC,
-            "payload": data,
+            "payload": sample_payload,
         }
 
     db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
@@ -192,14 +217,35 @@ async def get_crypto_pulse(request: Request):
     if _is_sample_request(request):
         if request.method == "HEAD":
             return Response(status_code=200, media_type="application/json")
-        data = await fetch_crypto_pulse_data()
+        sample_payload = {
+            "timestamp": "2026-01-01T00:00:00Z",
+            "tier": "micro_0.01_usdc",
+            "source_status": "SCHEMA_TEMPLATE_PREVIEW",
+            "market_sentiment": "neutral_template",
+            "fear_and_greed": {"index": 50, "classification": "Neutral"},
+            "volatility_index_24h": 0.0,
+            "volatility_metric": {"mean_abs_move_24h_pct": 0.0, "classification": "LOW (<1.5%)"},
+            "assets": {
+                "BTC": {"price_usd": 0.0, "change_24h_pct": 0.0, "volume_24h_usd": 0.0},
+                "ETH": {"price_usd": 0.0, "change_24h_pct": 0.0, "volume_24h_usd": 0.0},
+                "SOL": {"price_usd": 0.0, "change_24h_pct": 0.0, "volume_24h_usd": 0.0},
+            },
+            "top_trending_sectors": ["Base-L2-DeFi", "AI-Agent-Economy"],
+            "meta": {
+                "sources": ["schema_template"],
+                "as_of": "2026-01-01T00:00:00Z",
+                "status": "SCHEMA_TEMPLATE_ONLY",
+                "disclaimer": "Structure template only. Real-time live feeds require 0.01 USDC via x402 on Base.",
+            },
+            "cache_hit": False,
+        }
         return {
             "status": "SAMPLE_DATA_VERIFIED",
             "sample_mode": True,
             "sample_notice": "SAMPLE ONLY: Real-time feeds require 0.01 USDC via x402 on Base. Pass X-PAYMENT or X-PAYMENT-PROOF.",
             "feed": "/api/v1/crypto-pulse",
             "live_price_usdc": settings.PRICE_MICRO_USDC,
-            "payload": data,
+            "payload": sample_payload,
         }
 
     db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
@@ -239,14 +285,48 @@ async def get_deep_market_report(request: Request):
     if _is_sample_request(request):
         if request.method == "HEAD":
             return Response(status_code=200, media_type="application/json")
-        data = await fetch_deep_market_report()
+        sample_payload = {
+            "timestamp": "2026-01-01T00:00:00Z",
+            "tier": "premium_1.00_usdc",
+            "report_type": "Institutional M2M Quantitative Analysis (Schema Template)",
+            "macro_regime": "SAMPLE_REGIME",
+            "composite_momentum_score": 0.0,
+            "summary": "Sample quantitative report schema. Real-time signals unlocked upon payment.",
+            "base_l2_ecosystem_metrics": {
+                "settlement_token": "USDC (0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913)",
+                "m2m_x402_adoption_trend": "accelerating",
+                "estimated_l2_gas_cost_usd": 0.001,
+                "recommended_slippage_bps": 15,
+            },
+            "actionable_signals": [
+                {
+                    "asset": "SAMPLE/USDC",
+                    "signal": "SAMPLE_SIGNAL",
+                    "spot_reference_usd": 0.0,
+                    "confidence": 0.0,
+                    "time_horizon_hours": 12,
+                }
+            ],
+            "risk_matrix": {
+                "volatility_index_24h": 0.0,
+                "max_recommended_leverage": 2.0,
+                "stop_loss_atr_multiplier": 1.8,
+            },
+            "meta": {
+                "sources": ["schema_template"],
+                "as_of": "2026-01-01T00:00:00Z",
+                "status": "SCHEMA_TEMPLATE_ONLY",
+                "disclaimer": "Structure template only. Live quantitative report unlocked via 1.00 USDC x402 payment.",
+            },
+            "cache_hit": False,
+        }
         return {
             "status": "SAMPLE_DATA_VERIFIED",
             "sample_mode": True,
             "sample_notice": "SAMPLE ONLY: Full quantitative regime report requires 1.00 USDC via x402 on Base.",
             "feed": "/api/v1/deep-market-report",
             "live_price_usdc": settings.PRICE_PREMIUM_USDC,
-            "payload": data,
+            "payload": sample_payload,
         }
 
     db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
@@ -301,19 +381,35 @@ async def get_dynamic_trending_endpoint(slug: str, request: Request):
     if _is_sample_request(request):
         if request.method == "HEAD":
             return Response(status_code=200, media_type="application/json")
-        data = await fetch_dynamic_asset_pulse(
-            slug=clean_slug,
-            asset_name=matched["asset_name"],
-            asset_symbol=matched["asset_symbol"],
-            coingecko_id=matched["coingecko_id"],
-        )
+        sample_payload = {
+            "timestamp": "2026-01-01T00:00:00Z",
+            "tier": "dynamic_scout_0.05_usdc",
+            "source_status": "SCHEMA_TEMPLATE_PREVIEW",
+            "asset": {
+                "slug": clean_slug,
+                "name": matched["asset_name"],
+                "symbol": matched["asset_symbol"].upper(),
+                "coingecko_id": matched["coingecko_id"],
+                "price_usd": 0.0,
+                "change_24h_pct": 0.0,
+                "volume_24h_usd": 0.0,
+                "momentum_signal": "SAMPLE_FLOW",
+            },
+            "meta": {
+                "sources": ["schema_template"],
+                "as_of": "2026-01-01T00:00:00Z",
+                "status": "SCHEMA_TEMPLATE_ONLY",
+                "disclaimer": f"Structure template only. Live {matched['asset_symbol']} orderflow unlocked via {float(price_dec):.2f} USDC x402 payment.",
+            },
+            "cache_hit": False,
+        }
         return {
             "status": "SAMPLE_DATA_VERIFIED",
             "sample_mode": True,
             "sample_notice": f"SAMPLE ONLY: Live {matched['asset_symbol']} orderflow requires {float(price_dec):.2f} USDC via x402.",
             "feed": f"/api/v1/trending/{clean_slug}",
             "live_price_usdc": float(price_dec),
-            "payload": data,
+            "payload": sample_payload,
         }
 
     payment_check = await require_x402_payment(

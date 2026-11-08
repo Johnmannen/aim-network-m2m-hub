@@ -35,8 +35,8 @@ def _set_cached(key: str, data: Any) -> None:
 async def _fetch_live_crypto_prices() -> Tuple[Dict[str, Any], List[str], str]:
     """
     Robust multi-provider spot price fetcher:
-    1. Primary: Binance Multi-Ticker 24hr API (live price, 24h change, 24h volume)
-    2. Secondary: Coinbase Spot Price API (native Base ecosystem feed)
+    1. Primary: Coinbase Spot Price API (native Base ecosystem feed, parallel BTC, ETH, SOL)
+    2. Secondary: Binance Multi-Ticker 24hr API
     3. Tertiary: CoinGecko Simple Price API
     Returns: (prices_dict, sources_used, feed_status)
     """
@@ -46,11 +46,41 @@ async def _fetch_live_crypto_prices() -> Tuple[Dict[str, Any], List[str], str]:
     # Default realistic baseline if all upstreams fail
     prices = {
         "bitcoin": {"usd": 75850.0, "usd_24h_change": 0.5, "usd_24h_vol": 38000000000.0},
-        "ethereum": {"usd": 2240.0, "usd_24h_change": 0.2, "usd_24h_vol": 14000000000.0},
-        "solana": {"usd": 89.5, "usd_24h_change": -0.4, "usd_24h_vol": 520000000.0},
+        "ethereum": {"usd": 2238.0, "usd_24h_change": 0.2, "usd_24h_vol": 14000000000.0},
+        "solana": {"usd": 89.6, "usd_24h_change": -0.4, "usd_24h_vol": 520000000.0},
     }
 
-    # 1. Try Binance (Fastest single request for BTC, ETH, SOL)
+    # 1. Try Coinbase Spot (Native Base L2 provider - parallel fetch)
+    try:
+        import asyncio
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            cb_btc, cb_eth, cb_sol = await asyncio.gather(
+                client.get("https://api.coinbase.com/v2/prices/BTC-USD/spot"),
+                client.get("https://api.coinbase.com/v2/prices/ETH-USD/spot"),
+                client.get("https://api.coinbase.com/v2/prices/SOL-USD/spot"),
+                return_exceptions=True,
+            )
+            if not isinstance(cb_btc, Exception) and cb_btc.status_code == 200:
+                btc_p = float(cb_btc.json().get("data", {}).get("amount", 0.0) or 0.0)
+                if btc_p > 1000.0:
+                    prices["bitcoin"]["usd"] = btc_p
+                    sources_used.append("coinbase_spot_btc")
+            if not isinstance(cb_eth, Exception) and cb_eth.status_code == 200:
+                eth_p = float(cb_eth.json().get("data", {}).get("amount", 0.0) or 0.0)
+                if eth_p > 100.0:
+                    prices["ethereum"]["usd"] = eth_p
+                    sources_used.append("coinbase_spot_eth")
+            if not isinstance(cb_sol, Exception) and cb_sol.status_code == 200:
+                sol_p = float(cb_sol.json().get("data", {}).get("amount", 0.0) or 0.0)
+                if sol_p > 5.0:
+                    prices["solana"]["usd"] = sol_p
+                    sources_used.append("coinbase_spot_sol")
+            if sources_used:
+                feed_status = "LIVE_FEED_VERIFIED"
+    except Exception as exc:
+        logger.warning("Coinbase spot parallel fetch failed: %s", exc)
+
+    # 2. Try Binance (Ticker 24hr for price & volume enrichment)
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
             resp = await client.get(
@@ -63,54 +93,39 @@ async def _fetch_live_crypto_prices() -> Tuple[Dict[str, Any], List[str], str]:
                     sym = item.get("symbol")
                     if sym in mapping:
                         target = mapping[sym]
-                        prices[target] = {
-                            "usd": float(item.get("lastPrice", 0.0) or 0.0),
-                            "usd_24h_change": float(item.get("priceChangePercent", 0.0) or 0.0),
-                            "usd_24h_vol": float(item.get("quoteVolume", 0.0) or 0.0),
-                        }
-                if prices["bitcoin"]["usd"] > 1000.0:
-                    sources_used.append("binance_spot_24h")
-                    feed_status = "LIVE_FEED_VERIFIED"
-                    return prices, sources_used, feed_status
+                        last_p = float(item.get("lastPrice", 0.0) or 0.0)
+                        if target not in [s.replace("coinbase_spot_", "") for s in sources_used] and last_p > 0:
+                            prices[target]["usd"] = last_p
+                        prices[target]["usd_24h_change"] = float(item.get("priceChangePercent", 0.0) or 0.0)
+                        prices[target]["usd_24h_vol"] = float(item.get("quoteVolume", 0.0) or 0.0)
+                sources_used.append("binance_24h_stats")
+                feed_status = "LIVE_FEED_VERIFIED"
     except Exception as exc:
-        logger.warning("Binance spot ticker failed: %s", exc)
+        logger.warning("Binance ticker failed: %s", exc)
 
-    # 2. Try Coinbase Spot (Native Base L2 provider)
-    try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            cb_resp = await client.get("https://api.coinbase.com/v2/prices/BTC-USD/spot")
-            if cb_resp.status_code == 200:
-                cb_data = cb_resp.json().get("data", {})
-                btc_price = float(cb_data.get("amount", 0.0) or 0.0)
-                if btc_price > 1000.0:
-                    prices["bitcoin"]["usd"] = btc_price
-                    sources_used.append("coinbase_spot")
-                    feed_status = "LIVE_FEED_VERIFIED"
-    except Exception as exc:
-        logger.warning("Coinbase spot API failed: %s", exc)
-
-    # 3. Try CoinGecko Fallback
-    try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            cg_resp = await client.get(
-                "https://api.coingecko.com/api/v3/simple/price",
-                params={
-                    "ids": "bitcoin,ethereum,solana",
-                    "vs_currencies": "usd",
-                    "include_24hr_change": "true",
-                    "include_24hr_vol": "true",
-                },
-            )
-            if cg_resp.status_code == 200:
-                cg_json = cg_resp.json()
-                if "bitcoin" in cg_json:
-                    for k in ["bitcoin", "ethereum", "solana"]:
-                        if k in cg_json:
-                            prices[k] = cg_json[k]
-                    sources_used.append("coingecko_spot")
-                    feed_status = "LIVE_FEED_VERIFIED"
-    except Exception as exc:
-        logger.warning("CoinGecko API failed: %s", exc)
+    # 3. Try CoinGecko Fallback if still degraded
+    if feed_status == "DEGRADED":
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                cg_resp = await client.get(
+                    "https://api.coingecko.com/api/v3/simple/price",
+                    params={
+                        "ids": "bitcoin,ethereum,solana",
+                        "vs_currencies": "usd",
+                        "include_24hr_change": "true",
+                        "include_24hr_vol": "true",
+                    },
+                )
+                if cg_resp.status_code == 200:
+                    cg_json = cg_resp.json()
+                    if "bitcoin" in cg_json:
+                        for k in ["bitcoin", "ethereum", "solana"]:
+                            if k in cg_json:
+                                prices[k] = cg_json[k]
+                        sources_used.append("coingecko_spot")
+                        feed_status = "LIVE_FEED_VERIFIED"
+        except Exception as exc:
+            logger.warning("CoinGecko API failed: %s", exc)
 
     if not sources_used:
         sources_used.append("resilient_baseline")
@@ -148,7 +163,17 @@ async def fetch_crypto_pulse_data() -> Dict[str, Any]:
     eth_change = float(prices.get("ethereum", {}).get("usd_24h_change", 0.0) or 0.0)
     sol_change = float(prices.get("solana", {}).get("usd_24h_change", 0.0) or 0.0)
     avg_abs_move = round((abs(btc_change) + abs(eth_change) + abs(sol_change)) / 3.0, 2)
-    sentiment = "bullish" if (btc_change + eth_change) >= 0 else "bearish"
+    # Data-derived market sentiment combining Fear & Greed index with 24h price momentum
+    if fng_value < 35:
+        sentiment = "bearish_fear" if btc_change < 0 else "cautious_rebound"
+    elif fng_value > 65:
+        sentiment = "bullish_expansion" if btc_change >= 0 else "overbought_pullback"
+    else:
+        sentiment = "bullish_momentum" if btc_change >= 0 else "bearish_consolidation"
+
+    vol_classification = (
+        "LOW (<1.5%)" if avg_abs_move < 1.5 else ("MODERATE (1.5-4.0%)" if avg_abs_move < 4.0 else "HIGH (>4.0%)")
+    )
     now_iso = datetime.now(timezone.utc).isoformat()
     latency_ms = round((time.perf_counter() - start_perf) * 1000, 1)
 
@@ -162,6 +187,10 @@ async def fetch_crypto_pulse_data() -> Dict[str, Any]:
             "classification": fng_classification,
         },
         "volatility_index_24h": avg_abs_move,
+        "volatility_metric": {
+            "mean_abs_move_24h_pct": avg_abs_move,
+            "classification": vol_classification,
+        },
         "assets": {
             "BTC": {
                 "price_usd": round(float(prices.get("bitcoin", {}).get("usd", 75850.0)), 2),
@@ -171,14 +200,14 @@ async def fetch_crypto_pulse_data() -> Dict[str, Any]:
                 ),
             },
             "ETH": {
-                "price_usd": round(float(prices.get("ethereum", {}).get("usd", 2240.0)), 2),
+                "price_usd": round(float(prices.get("ethereum", {}).get("usd", 2238.0)), 2),
                 "change_24h_pct": round(eth_change, 2),
                 "volume_24h_usd": round(
                     float(prices.get("ethereum", {}).get("usd_24h_vol", 0.0) or 0.0), 2
                 ),
             },
             "SOL": {
-                "price_usd": round(float(prices.get("solana", {}).get("usd", 89.5)), 2),
+                "price_usd": round(float(prices.get("solana", {}).get("usd", 89.6)), 2),
                 "change_24h_pct": round(sol_change, 2),
                 "volume_24h_usd": round(
                     float(prices.get("solana", {}).get("usd_24h_vol", 0.0) or 0.0), 2
@@ -186,9 +215,10 @@ async def fetch_crypto_pulse_data() -> Dict[str, Any]:
             },
         },
         "top_trending_sectors": [
-            "AI-Agent-Protocols",
-            "x402-M2M-Payments",
             "Base-L2-DeFi",
+            "AI-Agent-Economy",
+            "RWA-Tokenization",
+            "Decentralized-Derivatives",
         ],
         "meta": {
             "sources": sources,

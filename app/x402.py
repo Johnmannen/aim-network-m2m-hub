@@ -90,15 +90,15 @@ def build_402_response(
             "vip_24h_pass_option": {
                 "amount": vip_str,
                 "description": (
-                    f"Pay {vip_str} USDC once to unlock a 24-hour VIP Pass "
-                    f"({settings.VIP_PASS_MAX_CALLS} calls across ALL endpoints using the same tx_hash)."
+                    f"Pay {vip_str} USDC once to unlock a 24-hour Micro VIP Pass "
+                    f"({settings.VIP_PASS_MAX_CALLS} calls across all micro feeds ($0.01-$0.05) using the same tx_hash)."
                 ),
             },
         },
         "free_live_teaser": teaser,
         "instructions": (
-            "Sign USDC transfer on Base (Chain ID 8453) to recipient address "
-            "and retry request with transaction hash in X-PAYMENT-PROOF header."
+            "Standard x402 (recommended): Sign EIP-3009 USDC authorization and send in X-PAYMENT or PAYMENT-SIGNATURE header. "
+            "Legacy on-chain: Transfer USDC on Base (Chain ID 8453) to recipient address and retry with transaction hash in X-PAYMENT-PROOF header."
         ),
     }
     if x402_standard.is_enabled():

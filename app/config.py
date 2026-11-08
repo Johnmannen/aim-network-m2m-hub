@@ -86,8 +86,12 @@ class Settings:
     PRICE_PREMIUM_USDC: float = float(PRICE_PREMIUM_DEC)
     PRICE_VIP_24H_USDC: float = float(PRICE_VIP_24H_DEC)
 
-    VIP_PASS_MAX_CALLS: int = 1000
+    VIP_PASS_MAX_CALLS: int = 100
     VIP_PASS_DURATION_HOURS: int = 24
+
+    PRO_PASS_PRICE_USDC: float = 10.0
+    PRO_PASS_MAX_CALLS: int = 25
+    PRO_PASS_DURATION_HOURS: int = 24
 
     # First-Time Buyer Welcome Bonus (Sybil-resistant on-chain onboarding reward)
     WELCOME_BONUS_ENABLED: bool = (
