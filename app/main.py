@@ -14,6 +14,7 @@ import logging
 import time
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 import httpx
 
@@ -74,6 +75,32 @@ def create_app(db_path: str | None = None) -> FastAPI:
     )
     if db_path:
         app.state.db_path = db_path
+
+    def custom_openapi():
+        if app.openapi_schema:
+            return app.openapi_schema
+        schema = get_openapi(
+            title=settings.PROJECT_NAME,
+            version=settings.VERSION,
+            description=(
+                "Autonomous Machine-to-Machine (M2M) Data & Quantitative Intelligence Hub. "
+                "Pay per request via HTTP 402 (x402 protocol) in USDC on Base Mainnet (Chain ID 8453)."
+            ),
+            routes=app.routes,
+        )
+        schema["info"]["x-payment-protocol"] = "x402"
+        schema["info"]["x-payment-network"] = "base-mainnet"
+        schema["info"]["x-payment-chain-id"] = settings.BASE_CHAIN_ID
+        schema["info"]["x-payment-token"] = "USDC"
+        schema["info"]["x-payment-contract"] = settings.USDC_CONTRACT_ADDRESS
+        schema["info"]["x-payment-recipient"] = settings.WALLET_ADDRESS
+        schema["info"]["x-payment-facilitator"] = (
+            settings.X402_FACILITATOR_URL or "https://facilitator.payai.network"
+        )
+        app.openapi_schema = schema
+        return app.openapi_schema
+
+    app.openapi = custom_openapi
 
     # Bounded sliding-window rate limiter (prevents memory leaks via periodic pruning)
     ip_hits: dict[str, list[float]] = defaultdict(list)

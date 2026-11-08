@@ -58,19 +58,20 @@ async def llms_txt_manifest(request: Request) -> str:
 - **Token:** `USDC` (`{settings.USDC_CONTRACT_ADDRESS}`)
 - **Recipient Wallet:** `{settings.WALLET_ADDRESS}`
 - **Proof Header:** `X-PAYMENT-PROOF: <0x_base_transaction_hash>`
+- **Free Schema Verification:** Append `?sample=true` to ANY endpoint (e.g. `/api/v1/crypto-pulse?sample=true`) for a free JSON schema verification sample before purchasing live data.
 {std_x402_note}
 ## Available M2M Endpoints
 0. `GET /api/v1/free-teaser`
    - **Price:** `0.00 USDC (FREE)`
    - **Description:** Instant live BTC spot & latency verification teaser for autonomous agents.
 1. `GET /api/v1/crypto-pulse`
-   - **Price:** `{settings.PRICE_MICRO_USDC:.2f} USDC`
+   - **Price:** `{settings.PRICE_MICRO_USDC:.2f} USDC` (Free sample: `?sample=true`)
    - **Description:** Real-time BTC/ETH/SOL prices, 24h volatility index, and Fear & Greed sentiment JSON.
 2. `GET /api/v1/base-dex-radar`
-   - **Price:** `{settings.PRICE_DEX_RADAR_USDC:.2f} USDC`
+   - **Price:** `{settings.PRICE_DEX_RADAR_USDC:.2f} USDC` (Free sample: `?sample=true`)
    - **Description:** Real-time Base L2 DEX liquidity pools, volume spikes, and whale inflow radar via DexScreener.
 3. `GET /api/v1/deep-market-report`
-   - **Price:** `{settings.PRICE_PREMIUM_USDC:.2f} USDC`
+   - **Price:** `{settings.PRICE_PREMIUM_USDC:.2f} USDC` (Free sample: `?sample=true`)
    - **Description:** Institutional M2M quantitative market regime, Base L2 liquidity metrics, and actionable trading signals JSON.
 {dynamic_lines}
 ## Volume Discount: 24-Hour VIP Pass (`{settings.PRICE_VIP_24H_USDC:.2f} USDC`)
@@ -86,9 +87,9 @@ async def llms_txt_manifest(request: Request) -> str:
 ```python
 import httpx
 
-# 1. Probe free teaser to verify freshness & latency
-r = httpx.get("https://johngarp.click/api/v1/free-teaser")
-print("Live status:", r.json()["status"])
+# 1. Probe free teaser or test schema sample (?sample=true)
+r = httpx.get("https://johngarp.click/api/v1/crypto-pulse?sample=true")
+print("Verified Schema:", r.json()["status"])
 
 # 2. Query paid feed via standard x402 header (or legacy tx-hash)
 # headers = {{"X-PAYMENT": "<base64_signed_eip3009_payload>"}}
@@ -159,6 +160,7 @@ async def agents_json_manifest(request: Request) -> dict:
         {
             "id": "crypto-pulse",
             "path": "/api/v1/crypto-pulse",
+            "sample_url": "/api/v1/crypto-pulse?sample=true",
             "method": "GET",
             "tier": "micro",
             "price_usdc": settings.PRICE_MICRO_USDC,
@@ -170,6 +172,7 @@ async def agents_json_manifest(request: Request) -> dict:
         {
             "id": "base-dex-radar",
             "path": "/api/v1/base-dex-radar",
+            "sample_url": "/api/v1/base-dex-radar?sample=true",
             "method": "GET",
             "tier": "micro",
             "price_usdc": settings.PRICE_DEX_RADAR_USDC,
@@ -181,6 +184,7 @@ async def agents_json_manifest(request: Request) -> dict:
         {
             "id": "deep-market-report",
             "path": "/api/v1/deep-market-report",
+            "sample_url": "/api/v1/deep-market-report?sample=true",
             "method": "GET",
             "tier": "premium",
             "price_usdc": settings.PRICE_PREMIUM_USDC,
@@ -196,6 +200,7 @@ async def agents_json_manifest(request: Request) -> dict:
             {
                 "id": f"trending-{ep['slug']}",
                 "path": ep["endpoint_path"],
+                "sample_url": f"{ep['endpoint_path']}?sample=true",
                 "method": "GET",
                 "tier": "dynamic_scout",
                 "price_usdc": ep["price_usdc"],

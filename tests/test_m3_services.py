@@ -62,3 +62,44 @@ def test_crypto_pulse_and_deep_report_flow(tmp_path: Path):
     assert stats["calls_premium"] == 1
     assert stats["revenue_usdc"] == 1.01
 
+
+def test_sample_mode_bypasses_x402_for_schema_preview(tmp_path: Path):
+    """Verify ?sample=true delivers free schema preview with sample_mode metadata without x402 payment."""
+    from app.main import create_app
+
+    db_file = str(tmp_path / "test_m3_sample.db")
+    app = create_app(db_path=db_file)
+    client = TestClient(app)
+
+    # 1. /api/v1/crypto-pulse?sample=true
+    r_pulse_sample = client.get("/api/v1/crypto-pulse?sample=true")
+    assert r_pulse_sample.status_code == 200
+    d_pulse = r_pulse_sample.json()
+    assert d_pulse["sample_mode"] is True
+    assert "SAMPLE ONLY" in d_pulse["sample_notice"]
+    assert "payload" in d_pulse
+    assert "BTC" in d_pulse["payload"]["assets"]
+
+    # HEAD on sample
+    assert client.head("/api/v1/crypto-pulse?sample=true").status_code == 200
+
+    # 2. /api/v1/base-dex-radar?sample=true
+    r_radar_sample = client.get("/api/v1/base-dex-radar?sample=true")
+    assert r_radar_sample.status_code == 200
+    assert r_radar_sample.json()["sample_mode"] is True
+
+    # 3. /api/v1/deep-market-report?sample=true
+    r_deep_sample = client.get("/api/v1/deep-market-report?sample=true")
+    assert r_deep_sample.status_code == 200
+    assert r_deep_sample.json()["sample_mode"] is True
+
+    # 4. Verify OpenAPI schema exposes x402 metadata
+    r_openapi = client.get("/openapi.json")
+    assert r_openapi.status_code == 200
+    schema = r_openapi.json()
+    assert schema["info"]["x-payment-protocol"] == "x402"
+    assert schema["info"]["x-payment-chain-id"] == 8453
+    pulse_op = schema["paths"]["/api/v1/crypto-pulse"]["get"]
+    assert pulse_op["x-payment-protocol"] == "x402"
+    assert pulse_op["x-sample-url"] == "/api/v1/crypto-pulse?sample=true"
+

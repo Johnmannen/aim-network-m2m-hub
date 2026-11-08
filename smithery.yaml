@@ -1,0 +1,7 @@
+# Smithery configuration for AIM Network MCP Server
+# https://smithery.ai/docs/config
+startCommand:
+  type: http
+  config:
+    url: https://johngarp.click/mcp
+
