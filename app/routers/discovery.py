@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Optional
 from fastapi import APIRouter, Header, HTTPException, Request
-from fastapi.responses import JSONResponse, PlainTextResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse, Response
 
 from app.config import settings
 from app.database import get_stats
@@ -76,20 +76,34 @@ async def llms_txt_manifest(request: Request) -> str:
    - **Price:** `{settings.PRICE_PREMIUM_USDC:.2f} USDC` (Free sample: `?sample=true`)
    - **Description:** Institutional M2M quantitative market regime, Base L2 liquidity metrics, and actionable trading signals JSON.
 {dynamic_lines}
+## Quantitative Classification Standards
+- **Market Sentiment Enum:** `bullish_expansion` (F&G > 65, BTC up), `overbought_pullback` (F&G > 65, BTC down), `cautious_rebound` (F&G < 35, BTC up), `bearish_fear` (F&G < 35, BTC down), `bullish_momentum` (Neutral F&G, BTC up), `bearish_consolidation` (Neutral F&G, BTC down).
+- **Volatility Metric:** Calculated as 24h mean absolute movement across BTC, ETH, and SOL:
+  - `LOW (<1.5%)`: Stable consolidation regime.
+  - `MODERATE (1.5-4.0%)`: Normal healthy active volatility.
+  - `HIGH (>4.0%)`: Elevated expansion or liquidation regime.
+
 ## Welcome Bonus: First-Time Buyer Campaign (Buy 1, Get 5 Free)
 - New wallet addresses that make their first USDC purchase on ANY endpoint automatically unlock **5 FREE bonus calls** across all micro feeds ($0.01-$0.05) for 24 hours.
 - Reuse the same `tx_hash` in `X-PAYMENT-PROOF: <tx_hash>` to consume your 5 bonus calls.
 
 ## Volume Discount: 24-Hour VIP Passes
-- **24-Hour Micro VIP Pass (`{settings.PRICE_VIP_24H_USDC:.2f} USDC`):** Send `{settings.PRICE_VIP_24H_USDC:.2f} USDC` on Base to `{settings.WALLET_ADDRESS}` and reuse the same `X-PAYMENT-PROOF` transaction hash for up to **{settings.VIP_PASS_MAX_CALLS} calls across all micro feeds ($0.01-$0.05) for 24 hours**.
-- **24-Hour Pro VIP Pass (`10.00 USDC`):** Full 24h unlimited access to all endpoints including Deep Market Reports ($1.00) up to 500 calls.
+- **24-Hour Micro VIP Pass (`{settings.PRICE_VIP_24H_USDC:.2f} USDC`):** Pay `{settings.PRICE_VIP_24H_USDC:.2f} USDC` once to unlock **{settings.VIP_PASS_MAX_CALLS} calls across all micro feeds ($0.01-$0.05)** for 24 hours (0.004 USDC/call, 60-92% discount). Bound to verified payer wallet.
+- **24-Hour Pro VIP Pass (`10.00 USDC`):** Pay `10.00 USDC` once to unlock **{settings.PRO_PASS_MAX_CALLS} calls across ALL endpoints including Deep Market Reports ($1.00)** for 24 hours (0.20 USDC/call, 80% discount).
 
-## Machine Catalogs
+## Replay Prevention & Single-Use Token Burn
+- Single-use on-chain transaction hashes are permanently burned in SQLite on first consumption. Replay attempts from any client are immediately rejected with HTTP 402 `REPLAY_REJECTED`.
+- For zero-sharing guarantee, agents should use standard x402 (EIP-3009 signed transfer authorization), which is cryptographically tied to the payer's private key.
+
+## Machine Catalogs & Legal
 - Agent Catalog: `/agents.json`
 - MCP Server Manifest & JSON-RPC: `/mcp`
 - A2A Agent Card: `/.well-known/agent.json`
 - Trending Assets Index: `/api/v1/trending`
-- OpenAPI Schema: `/openapi.json`
+- Terms of Service: `/terms` (HTML & JSON)
+- Privacy Policy & GDPR: `/privacy` (HTML & JSON)
+- Refund & Settlement: `/refund` (HTML & JSON)
+- Operational Status: `/status` (HTML & JSON)
 
 ## Disclaimer
 > All feeds and signals provide quantitative informational market metrics only. Not financial, trading, or investment advice.
@@ -271,11 +285,18 @@ async def well_known_agent_card(request: Request) -> Response:
     if request.method == "HEAD":
         return Response(status_code=200, media_type="application/json")
     return JSONResponse({
-        "$schema": "https://a2a-standard.org/schemas/agent-card.json",
+        "$schema": "https://agent2agent.ai/schemas/agent-card.json",
         "name": "AIM Network M2M Hub",
         "description": "Autonomous quantitative market data, Base L2 DEX whale radar, and orderflow analytics payable via HTTP 402 (x402) on Base.",
         "version": settings.VERSION,
         "url": "https://johngarp.click",
+        "tags": [
+            "financial-data",
+            "crypto-market-intelligence",
+            "base-l2",
+            "x402-micropayments",
+            "mcp-tools",
+        ],
         "auth": {
             "type": "x402",
             "version": "1.0",
@@ -285,16 +306,18 @@ async def well_known_agent_card(request: Request) -> Response:
             "token_contract": settings.USDC_CONTRACT_ADDRESS,
             "recipient_wallet": settings.WALLET_ADDRESS,
             "header_name": "X-PAYMENT-PROOF",
+            "standard_header": "PAYMENT-SIGNATURE",
         },
         "provider": {
-            "organization": "AIM Network",
+            "organization": "AIM Network Operations",
             "url": "https://johngarp.click",
+            "contact": "support@johngarp.click",
         },
         "capabilities": {
             "mcp": {
                 "supported": True,
                 "endpoint": "https://johngarp.click/mcp",
-                "protocol_version": "2025-03-26",
+                "protocol_version": "2024-11-05",
             },
             "payment": {
                 "protocol": "x402",
@@ -313,6 +336,9 @@ async def well_known_agent_card(request: Request) -> Response:
                 "description": "Free zero-auth latency and BTC spot verification feed.",
                 "url": "https://johngarp.click/api/v1/free-teaser",
                 "cost_usdc": 0.0,
+                "tags": ["free", "teaser", "btc", "latency-benchmark"],
+                "inputModes": ["direct", "mcp"],
+                "outputModes": ["application/json"],
             },
             {
                 "id": "crypto-pulse",
@@ -320,6 +346,9 @@ async def well_known_agent_card(request: Request) -> Response:
                 "description": "Real-time BTC/ETH/SOL market pulse, sentiment, and volatility metrics.",
                 "url": "https://johngarp.click/api/v1/crypto-pulse",
                 "cost_usdc": 0.01,
+                "tags": ["crypto", "spot", "volatility", "sentiment"],
+                "inputModes": ["direct", "mcp"],
+                "outputModes": ["application/json"],
             },
             {
                 "id": "base-dex-radar",
@@ -327,6 +356,9 @@ async def well_known_agent_card(request: Request) -> Response:
                 "description": "Base L2 DEX liquidity pools, volume spikes, and whale orderflow tracking.",
                 "url": "https://johngarp.click/api/v1/base-dex-radar",
                 "cost_usdc": 0.05,
+                "tags": ["dex", "base-l2", "whales", "liquidity-pools"],
+                "inputModes": ["direct", "mcp"],
+                "outputModes": ["application/json"],
             },
             {
                 "id": "deep-market-report",
@@ -334,6 +366,9 @@ async def well_known_agent_card(request: Request) -> Response:
                 "description": "Quantitative regime detection, momentum scoring, and actionable signals.",
                 "url": "https://johngarp.click/api/v1/deep-market-report",
                 "cost_usdc": 1.00,
+                "tags": ["quantitative", "institutional", "signals", "alpha"],
+                "inputModes": ["direct", "mcp"],
+                "outputModes": ["application/json"],
             },
             {
                 "id": "trending",
@@ -341,6 +376,9 @@ async def well_known_agent_card(request: Request) -> Response:
                 "description": "Free public index of active momentum tokens on Base L2.",
                 "url": "https://johngarp.click/api/v1/trending",
                 "cost_usdc": 0.0,
+                "tags": ["free", "momentum", "trending", "discovery"],
+                "inputModes": ["direct", "mcp"],
+                "outputModes": ["application/json"],
             },
         ],
     })
@@ -642,76 +680,245 @@ async def mcp_server_endpoint(request: Request) -> Response:
     )
 
 
-@router.api_route("/terms", methods=["GET", "HEAD"], response_class=JSONResponse)
+def _prefers_html(request: Request) -> bool:
+    accept = request.headers.get("accept", "").lower()
+    return "text/html" in accept and "application/json" not in accept
+
+
+def _legal_html_shell(title: str, body_content: str) -> str:
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{title} — AIM Network M2M Hub</title>
+  <style>
+    :root {{ --bg: #090d16; --card: #131b2e; --text: #e2e8f0; --accent: #38bdf8; --border: #1e293b; --muted: #94a3b8; }}
+    body {{ background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 2rem 1rem; line-height: 1.6; }}
+    .container {{ max-width: 800px; margin: 0 auto; background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 2.5rem; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }}
+    h1 {{ color: #fff; font-size: 1.8rem; margin-top: 0; border-bottom: 1px solid var(--border); padding-bottom: 1rem; }}
+    h2 {{ color: var(--accent); font-size: 1.25rem; margin-top: 1.8rem; }}
+    p, li {{ color: var(--text); font-size: 0.95rem; }}
+    ul {{ padding-left: 1.25rem; }}
+    .meta {{ font-size: 0.85rem; color: var(--muted); margin-bottom: 1.5rem; }}
+    a {{ color: var(--accent); text-decoration: none; }}
+    a:hover {{ text-decoration: underline; }}
+    .footer {{ margin-top: 2.5rem; border-top: 1px solid var(--border); padding-top: 1rem; font-size: 0.8rem; color: var(--muted); display: flex; justify-content: space-between; }}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>{title}</h1>
+    {body_content}
+    <div class="footer">
+      <span>AIM Network Operations (Stockholm, Sweden)</span>
+      <span><a href="/">Landing</a> &bull; <a href="/terms">Terms</a> &bull; <a href="/privacy">Privacy</a> &bull; <a href="/refund">Refund</a> &bull; <a href="/status">Status</a></span>
+    </div>
+  </div>
+</body>
+</html>"""
+
+
+@router.api_route("/terms", methods=["GET", "HEAD"])
 async def terms_of_service(request: Request):
-    """Terms of Service for AIM Network Autonomous M2M Services."""
+    """Terms of Service for AIM Network Autonomous M2M Services (HTML & JSON)."""
     if request.method == "HEAD":
         return Response(status_code=200, media_type="application/json")
-    return JSONResponse({
+
+    data = {
         "service": "AIM Network M2M Data Hub",
         "updated_at": "2026-11-08",
-        "operator": "AIM Network (johngarp.click)",
-        "contact": "support@johngarp.click",
-        "service_model": "Machine-payable per-request data feeds via x402 on Base L2.",
-        "disclaimer": "All market metrics, orderflow, and analytics provided 'as-is' for informational, quantitative research, and algorithm verification purposes only. Not investment, trading, or financial advice.",
-        "rate_limits": f"{settings.RATE_LIMIT_PER_MINUTE} requests per minute per IP.",
-        "sla_target": "Sub-150ms server-side latency on cached feeds; 99.9% uptime target.",
-    })
+        "operator": {
+            "legal_entity": "AIM Network Operations",
+            "representative": "John Garp",
+            "jurisdiction": "Stockholm, Sweden (European Union)",
+            "contact": "ops@johngarp.click",
+            "support": "support@johngarp.click",
+        },
+        "governing_law": "Laws of Sweden and European Union regulations. Exclusive forum: Stockholm District Court (Stockholms tingsrätt).",
+        "service_model": "Autonomous machine-payable API feeds payable via HTTP 402 (x402) on Base Mainnet (Chain ID 8453).",
+        "disclaimer": "All crypto market pulse metrics, DEX whale liquidity signals, and quantitative analysis are provided strictly 'as-is' for algorithmic verification, automated machine research, and quantitative analysis. Under no circumstances does any endpoint constitute financial, investment, trading, or tax advice.",
+        "limitation_of_liability": "To the maximum extent permitted by applicable law, the operator shall not be liable for any trading losses, algorithmic execution errors, third-party RPC node outages, or blockchain network congestion.",
+        "rate_limits": {
+            "policy": f"{settings.RATE_LIMIT_PER_MINUTE} requests per minute per IP address.",
+            "exemption": "High-volume institutional agents may authenticate via EIP-3009 signed authorizations.",
+        },
+        "sla_targets": {
+            "l1_cache_latency": "<15ms (in-memory response)",
+            "upstream_fetch_latency": "300-800ms (multi-exchange live aggregation)",
+            "availability_target": "99.9% uptime",
+        },
+    }
+
+    if _prefers_html(request):
+        html_body = f"""
+        <div class="meta">Last Updated: {data['updated_at']} &bull; Operator: {data['operator']['legal_entity']} &bull; Jurisdiction: {data['operator']['jurisdiction']}</div>
+        <h2>1. Operator & Governing Law</h2>
+        <p>The AIM Network M2M Hub is operated by <strong>{data['operator']['legal_entity']}</strong> (represented by {data['operator']['representative']}), located in {data['operator']['jurisdiction']}. These terms and all platform usage are governed exclusively by the <strong>{data['governing_law']}</strong>.</p>
+        <h2>2. Service Model & Machine Payments</h2>
+        <p>{data['service_model']} Endpoints may be consumed per-call in USDC via cryptographic authorizations (EIP-3009) or 24-hour non-custodial VIP passes.</p>
+        <h2>3. Financial Disclaimer & Algorithmic Scope</h2>
+        <p>{data['disclaimer']}</p>
+        <h2>4. Limitation of Liability</h2>
+        <p>{data['limitation_of_liability']}</p>
+        <h2>5. Performance Targets & SLA</h2>
+        <ul>
+          <li><strong>In-Memory Cache Latency Target:</strong> {data['sla_targets']['l1_cache_latency']}</li>
+          <li><strong>Upstream Multi-Exchange Aggregation:</strong> {data['sla_targets']['upstream_fetch_latency']}</li>
+          <li><strong>Platform Availability Target:</strong> {data['sla_targets']['availability_target']}</li>
+        </ul>
+        <h2>6. Inquiries & Contact</h2>
+        <p>For operational inquiries, reach out to <a href="mailto:{data['operator']['contact']}">{data['operator']['contact']}</a> or visit our <a href="https://github.com/Johnmannen/aim-network-m2m-hub">GitHub repository</a>.</p>
+        """
+        return HTMLResponse(_legal_html_shell("Terms of Service", html_body))
+
+    return JSONResponse(data)
 
 
-@router.api_route("/privacy", methods=["GET", "HEAD"], response_class=JSONResponse)
+@router.api_route("/privacy", methods=["GET", "HEAD"])
 async def privacy_policy(request: Request):
-    """Privacy Policy for M2M autonomous agents and API consumers."""
+    """Privacy Policy & GDPR Compliance Disclosure for M2M Agents and Humans."""
     if request.method == "HEAD":
         return Response(status_code=200, media_type="application/json")
-    return JSONResponse({
+
+    data = {
         "service": "AIM Network M2M Data Hub",
         "updated_at": "2026-11-08",
-        "pii_collected": "None. No accounts, email addresses, names, or passwords are required or collected.",
-        "data_logged": "Public blockchain wallet addresses, transaction hashes, timestamps, and HTTP response codes are logged strictly for rate limiting, replay attack prevention, and security auditing.",
-        "retention_policy": "Rolling 30-day automated log pruning.",
-        "cookies": "Session cookies are used exclusively for authenticated admin overseers at /admin. No tracking cookies are served to API consumers.",
-    })
+        "data_controller": {
+            "name": "AIM Network Operations",
+            "dpo_contact": "privacy@johngarp.click",
+            "address": "Stockholm, Sweden (European Union)",
+        },
+        "gdpr_compliance": {
+            "legal_basis": "GDPR Article 6(1)(f) — Legitimate Interest. Processing is strictly limited to safeguarding platform integrity, preventing distributed denial-of-service (DDoS) disruptions, and securing cryptographic payment verification against replay attacks.",
+            "data_categories": {
+                "ip_addresses": "Logged ephemerally for rate limiting (60 req/min) and brute force lockout mitigation. Stored in rolling memory logs.",
+                "wallet_addresses_and_hashes": "Public on-chain Base L2 addresses and transaction hashes processed exclusively for payment settlement, VIP pass verification, and Sybil-resistant welcome bonuses.",
+                "personal_data_collected": "None. No accounts, emails, passwords, phone numbers, or profiling cookies are requested or stored for API consumers.",
+            },
+            "retention_period": "30 days automated rolling pruning for transient IP traffic logs. Blockchain transaction receipts are permanently stored on the decentralized Base L2 ledger.",
+            "data_subject_rights": "Under GDPR Articles 15-22, users may request access, rectification, or erasure of their transient server log entries by contacting privacy@johngarp.click.",
+        },
+        "cookies": "Session cookies are used exclusively for authenticated administrative sessions at /admin. No tracking, analytics, or behavioral cookies are delivered to API consumers or public visitors.",
+    }
+
+    if _prefers_html(request):
+        html_body = f"""
+        <div class="meta">Last Updated: {data['updated_at']} &bull; Data Controller: {data['data_controller']['name']} &bull; Contact: {data['data_controller']['dpo_contact']}</div>
+        <h2>1. Data Controller & Scope</h2>
+        <p>The controller responsible for data processing on this platform is <strong>{data['data_controller']['name']}</strong>, based in {data['data_controller']['address']}. Inquiries regarding data protection may be directed to <a href="mailto:{data['data_controller']['dpo_contact']}">{data['data_controller']['dpo_contact']}</a>.</p>
+        <h2>2. Legal Basis for Processing (GDPR Art. 6(1)(f))</h2>
+        <p>{data['gdpr_compliance']['legal_basis']}</p>
+        <h2>3. Data Categories Processed</h2>
+        <ul>
+          <li><strong>IP Addresses:</strong> {data['gdpr_compliance']['data_categories']['ip_addresses']}</li>
+          <li><strong>On-Chain Identifiers:</strong> {data['gdpr_compliance']['data_categories']['wallet_addresses_and_hashes']}</li>
+          <li><strong>PII & Account Credentials:</strong> {data['gdpr_compliance']['data_categories']['personal_data_collected']}</li>
+        </ul>
+        <h2>4. Data Retention & Erasure</h2>
+        <p>{data['gdpr_compliance']['retention_period']}</p>
+        <h2>5. Your Rights as a Data Subject</h2>
+        <p>{data['gdpr_compliance']['data_subject_rights']}</p>
+        """
+        return HTMLResponse(_legal_html_shell("Privacy Policy & GDPR Disclosure", html_body))
+
+    return JSONResponse(data)
 
 
-@router.api_route("/refund", methods=["GET", "HEAD"], response_class=JSONResponse)
+@router.api_route("/refund", methods=["GET", "HEAD"])
 async def refund_policy(request: Request):
-    """Transparent Refund & Settlement Policy for x402 Micropayments."""
+    """Transparent Settlement & Refund Policy for x402 Micropayments."""
     if request.method == "HEAD":
         return Response(status_code=200, media_type="application/json")
-    return JSONResponse({
+
+    data = {
         "service": "AIM Network M2M Data Hub",
         "updated_at": "2026-11-08",
-        "settlement_guarantee": "Under the standard x402 protocol, payment authorizations are only settled on-chain upon successful delivery of a valid HTTP 200 payload.",
-        "failed_requests": "Requests resulting in 5xx server errors, timeouts, or degraded upstream feeds are never settled or charged.",
-        "legacy_onchain_proofs": "Transactions verified via on-chain hash (X-PAYMENT-PROOF) are irrevocable on Base L2. If an error occurs after receipt verification, a replacement VIP pass or equivalent API credit is granted upon request.",
-        "dispute_contact": "support@johngarp.click (or open an issue at https://github.com/Johnmannen/aim-network-m2m-hub).",
-    })
+        "settlement_guarantee": "Under standard x402 (EIP-3009 signed authorizations), payment transfer authorizations are verified and settled on-chain strictly AFTER the application successfully generates and delivers a valid HTTP 200 payload.",
+        "failed_or_degraded_requests": "Calls resulting in HTTP 5xx server errors, upstream API timeouts, or unverified feeds are NEVER submitted for settlement. The client's signed authorization expires unexecuted with zero cost.",
+        "legacy_onchain_proofs": {
+            "single_use_tokens": "On-chain transaction hashes submitted via X-PAYMENT-PROOF are recorded atomically in SQLite to guarantee single-use consumption and prevent replay vulnerabilities across agents.",
+            "vip_passes": f"24h VIP Passes allow up to {settings.VIP_PASS_MAX_CALLS} calls (Micro) or {settings.PRO_PASS_MAX_CALLS} calls (Pro). Passes are cryptographically tied to the verified on-chain sender address (from) to prevent unauthorized pass sharing.",
+            "outage_remedy": "In the event of an unserved request using an on-chain transaction hash, contact support@johngarp.click with the transaction hash to receive an immediate replacement VIP pass or equivalent credit.",
+        },
+        "dispute_contact": "support@johngarp.click (or open a public issue on GitHub: https://github.com/Johnmannen/aim-network-m2m-hub).",
+    }
+
+    if _prefers_html(request):
+        html_body = f"""
+        <div class="meta">Last Updated: {data['updated_at']} &bull; Settlement Protocol: x402 / EIP-3009 on Base Mainnet</div>
+        <h2>1. Pre-Settlement Guarantee (Zero Charge on Failures)</h2>
+        <p>{data['settlement_guarantee']}</p>
+        <h2>2. Failed or Degraded Requests</h2>
+        <p>{data['failed_or_degraded_requests']}</p>
+        <h2>3. Legacy On-Chain Proofs & Pass Security</h2>
+        <ul>
+          <li><strong>Single-Use Burn:</strong> {data['legacy_onchain_proofs']['single_use_tokens']}</li>
+          <li><strong>VIP Pass Wallet Binding:</strong> {data['legacy_onchain_proofs']['vip_passes']}</li>
+          <li><strong>Outage Remedy:</strong> {data['legacy_onchain_proofs']['outage_remedy']}</li>
+        </ul>
+        <h2>4. Disputes & Support</h2>
+        <p>{data['dispute_contact']}</p>
+        """
+        return HTMLResponse(_legal_html_shell("Refund & Settlement Policy", html_body))
+
+    return JSONResponse(data)
 
 
-@router.api_route("/status", methods=["GET", "HEAD"], response_class=JSONResponse)
+@router.api_route("/status", methods=["GET", "HEAD"])
 async def service_status(request: Request):
-    """System health, upstream SLA metrics, and operational status."""
+    """System health, upstream SLA metrics, and operational status (HTML & JSON)."""
     if request.method == "HEAD":
         return Response(status_code=200, media_type="application/json")
     db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
     stats = get_stats(db_override)
-    return JSONResponse({
+
+    data = {
         "status": "OPERATIONAL",
         "network": "Base Mainnet (Chain ID 8453)",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "uptime_24h": "100.0%",
-        "sla_latency_target": "<150ms (in-memory cached SLA)",
+        "sla_latency_targets": {
+            "l1_cache_response": "<15ms (in-memory L1 cache)",
+            "upstream_aggregation": "300-800ms (Coinbase Exchange parallel fetch)",
+        },
         "upstreams": {
             "base_l2_rpc": "HEALTHY",
-            "coinbase_spot": "HEALTHY",
-            "binance_stats": "HEALTHY",
+            "coinbase_exchange_stats": "HEALTHY",
+            "coingecko_spot_fallback": "HEALTHY",
             "payai_facilitator": "HEALTHY",
             "dexscreener": "HEALTHY",
         },
         "stats_overview": {
             "total_calls_served": stats.get("total_calls", 0),
+            "calls_micro": stats.get("calls_micro", 0),
+            "calls_premium": stats.get("calls_premium", 0),
             "system_paused": stats.get("paused", False),
         },
-    })
+    }
+
+    if _prefers_html(request):
+        html_body = f"""
+        <div class="meta">Status: <strong style="color: #4ade80;">{data['status']}</strong> &bull; Timestamp: {data['timestamp']}</div>
+        <h2>System Overview</h2>
+        <p><strong>Network:</strong> {data['network']}<br>
+        <strong>24h Availability:</strong> {data['uptime_24h']}<br>
+        <strong>Total Calls Processed:</strong> {data['stats_overview']['total_calls_served']}</p>
+        <h2>Latency SLA Targets</h2>
+        <ul>
+          <li><strong>In-Memory L1 Cache:</strong> {data['sla_latency_targets']['l1_cache_response']}</li>
+          <li><strong>Upstream Aggregation:</strong> {data['sla_latency_targets']['upstream_aggregation']}</li>
+        </ul>
+        <h2>Upstream Subsystem Health</h2>
+        <ul>
+          <li>Base L2 RPC: <span style="color:#4ade80;">{data['upstreams']['base_l2_rpc']}</span></li>
+          <li>Coinbase Exchange Stats: <span style="color:#4ade80;">{data['upstreams']['coinbase_exchange_stats']}</span></li>
+          <li>CoinGecko Fallback: <span style="color:#4ade80;">{data['upstreams']['coingecko_spot_fallback']}</span></li>
+          <li>PayAI Facilitator: <span style="color:#4ade80;">{data['upstreams']['payai_facilitator']}</span></li>
+          <li>DexScreener Radar: <span style="color:#4ade80;">{data['upstreams']['dexscreener']}</span></li>
+        </ul>
+        """
+        return HTMLResponse(_legal_html_shell("System Operational Status", html_body))
+
+    return JSONResponse(data)
 
