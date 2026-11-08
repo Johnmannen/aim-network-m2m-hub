@@ -187,14 +187,17 @@ def create_app(db_path: str | None = None) -> FastAPI:
         response = await call_next(request)
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
         try:
+            full_path = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+            is_sample = request.query_params.get("sample", "").lower() in ("true", "1", "yes")
             log_traffic_event(
-                path=request.url.path,
+                path=full_path,
                 method=request.method,
                 status_code=response.status_code,
                 user_agent=user_agent,
                 country=country,
                 latency_ms=elapsed_ms,
                 has_admin_cookie=has_admin_cookie,
+                is_sample=is_sample,
                 db_path=db_override,
             )
         except Exception as exc:

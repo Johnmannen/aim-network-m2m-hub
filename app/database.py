@@ -221,7 +221,7 @@ def get_stats(db_path: Optional[str] = None) -> Dict[str, Any]:
             """
         ).fetchall()
 
-        discovery_hits = int(funnel_map.get("DISCOVERY", 0))
+        discovery_hits = int(funnel_map.get("DISCOVERY", 0)) + int(funnel_map.get("SAMPLE_200", 0))
         quotes_402 = int(funnel_map.get("QUOTE_402", 0))
         paid_200 = int(funnel_map.get("PAID_200", 0))
         blocked_hits = int(funnel_map.get("BLOCKED", 0))
@@ -564,6 +564,7 @@ def log_traffic_event(
     country: str = "GLOBAL",
     latency_ms: float = 0.0,
     has_admin_cookie: bool = False,
+    is_sample: bool = False,
     db_path: Optional[str] = None,
 ) -> None:
     """Record an HTTP request into traffic_logs with automatic funnel categorization."""
@@ -599,6 +600,8 @@ def log_traffic_event(
         category = "SCANNER"
     elif status_code in (401, 403, 429, 503):
         category = "BLOCKED"
+    elif is_sample or "sample=true" in path_lower or "sample=1" in path_lower:
+        category = "SAMPLE_200"
     elif (
         path.startswith("/api/v1/")
         and path != "/api/v1/free-teaser"
