@@ -12,7 +12,7 @@ import secrets
 import time
 from typing import Optional
 from fastapi import APIRouter, Header, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from pydantic import BaseModel
 
@@ -456,11 +456,7 @@ async def clear_admin_traffic_logs(
     return {"status": "traffic_cleared", "stats": updated_stats}
 
 
-@router.get("/", response_class=HTMLResponse)
-async def overseer_dashboard(request: Request) -> HTMLResponse:
-    """Render the Overseer Dashboard (admin session required; otherwise a minimal login page)."""
-    if not has_valid_session(request):
-        return HTMLResponse(content=LOGIN_HTML, headers={"Cache-Control": "no-store"})
+def _render_dashboard_html(request: Request) -> HTMLResponse:
     db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
     stats = get_stats(db_override)
 
@@ -486,7 +482,7 @@ async def overseer_dashboard(request: Request) -> HTMLResponse:
 
     telemetry = stats.get("traffic_telemetry", {})
     stream_events = []
-    for ev in telemetry.get("recent_stream", [])[:12]:
+    for ev in telemetry.get("recent_stream", [])[:15]:
         ts_short = (
             ev["created_at"][11:19]
             if len(ev.get("created_at", "")) >= 19
@@ -502,6 +498,9 @@ async def overseer_dashboard(request: Request) -> HTMLResponse:
         elif cat == "DISCOVERY":
             badge_cls = "b-disc"
             badge_txt = f"🔍 {ev['status_code']} MENY/KATALOG"
+        elif cat == "SCANNER":
+            badge_cls = "b-block"
+            badge_txt = f"🛡️ {ev['status_code']} SKANNARE"
         elif cat == "BLOCKED":
             badge_cls = "b-block"
             badge_txt = f"🛡️ {ev['status_code']} BLOCKERAD"
@@ -544,3 +543,70 @@ async def overseer_dashboard(request: Request) -> HTMLResponse:
         total_active_apis=3 + len(stats.get("dynamic_endpoints", [])),
     )
     return HTMLResponse(content=html_content)
+
+
+@router.api_route("/admin", methods=["GET", "HEAD"], response_class=HTMLResponse)
+async def admin_dashboard_portal(request: Request) -> Response:
+    """Dedicated Admin Portal (shows login form if unauthenticated, Overseer Dashboard if authenticated)."""
+    if not has_valid_session(request):
+        if request.method == "HEAD":
+            return Response(status_code=200, media_type="text/html")
+        return HTMLResponse(content=LOGIN_HTML, headers={"Cache-Control": "no-store"})
+    if request.method == "HEAD":
+        return Response(status_code=200, media_type="text/html")
+    return _render_dashboard_html(request)
+
+
+@router.api_route("/", methods=["GET", "HEAD"])
+async def root_entrypoint(request: Request) -> Response:
+    """
+    Public Entrypoint for AIM Network:
+    - Returns JSON machine discovery manifest when requested with Accept: application/json or ?format=json.
+    - If user has active admin session, renders Overseer Dashboard.
+    - Otherwise, renders high-converting public landing page for human visitors and web agents.
+    """
+    accept = request.headers.get("accept", "").lower()
+    is_json = "application/json" in accept or request.query_params.get("format") == "json"
+
+    if is_json:
+        manifest = {
+            "name": settings.PROJECT_NAME,
+            "version": settings.VERSION,
+            "description": "Ultra-fast (<150ms cached) machine-payable quantitative market feeds via HTTP 402 on Base Mainnet.",
+            "network": f"base-mainnet (Chain ID {settings.BASE_CHAIN_ID})",
+            "token": f"USDC ({settings.USDC_CONTRACT_ADDRESS})",
+            "wallet": settings.WALLET_ADDRESS,
+            "x402_support": {
+                "standard_v1": "X-PAYMENT header (EIP-3009)",
+                "standard_v2": "PAYMENT-SIGNATURE header",
+                "legacy": "X-PAYMENT-PROOF: <tx_hash>",
+                "facilitator": settings.X402_FACILITATOR_URL or "https://facilitator.payai.network",
+            },
+            "catalogs": {
+                "llms_txt": "/llms.txt",
+                "agents_json": "/agents.json",
+                "agent_card": "/.well-known/agent.json",
+                "mcp": "/mcp",
+                "openapi": "/openapi.json",
+            },
+            "endpoints": [
+                {"path": "/api/v1/free-teaser", "price_usdc": 0.0, "description": "Free instant live BTC spot preview & latency verification"},
+                {"path": "/api/v1/crypto-pulse", "price_usdc": settings.PRICE_MICRO_USDC, "description": "Real-time BTC/ETH/SOL prices, 24h volatility, Fear & Greed sentiment"},
+                {"path": "/api/v1/base-dex-radar", "price_usdc": settings.PRICE_DEX_RADAR_USDC, "description": "Base L2 DEX whale liquidity, volume spikes & top pools"},
+                {"path": "/api/v1/deep-market-report", "price_usdc": settings.PRICE_PREMIUM_USDC, "description": "Institutional M2M quantitative market regime & Base liquidity report"},
+                {"path": "/api/v1/trending/{slug}", "price_usdc": settings.PRICE_DYNAMIC_USDC, "description": "Auto-deployed live pulse for trending Base assets"},
+            ],
+        }
+        if request.method == "HEAD":
+            return Response(status_code=200, media_type="application/json")
+        return JSONResponse(content=manifest)
+
+    if has_valid_session(request):
+        if request.method == "HEAD":
+            return Response(status_code=200, media_type="text/html")
+        return _render_dashboard_html(request)
+
+    if request.method == "HEAD":
+        return Response(status_code=200, media_type="text/html")
+    landing_template = _jinja_env.get_template("landing.html")
+    return HTMLResponse(content=landing_template.render())

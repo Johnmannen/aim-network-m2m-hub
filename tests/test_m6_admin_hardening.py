@@ -49,7 +49,7 @@ def test_keepalive_traffic_is_internal(tmp_path):
 
 def test_dashboard_locked_without_session(tmp_path):
     c = _client(tmp_path)
-    r = c.get("/")
+    r = c.get("/admin")
     assert r.status_code == 200
     assert "Logga in" in r.text
     assert "USDC" not in r.text and "Intäkt" not in r.text
@@ -58,10 +58,10 @@ def test_dashboard_locked_without_session(tmp_path):
 def test_dashboard_login_flow(tmp_path):
     c = _client(tmp_path)
     assert c.post("/api/admin/login", json={"pin": "wrong"}).status_code == 401
-    assert c.get("/").text.count("Logga in") >= 1
+    assert c.get("/admin").text.count("Logga in") >= 1
     ok = c.post("/api/admin/login", json={"pin": settings.ADMIN_PIN})
     assert ok.status_code == 200
-    page = c.get("/")
+    page = c.get("/admin")
     assert "Logga in" not in page.text
     # session cookie also unlocks admin JSON endpoints
     assert c.get("/api/admin/stats").status_code == 200
@@ -70,7 +70,7 @@ def test_dashboard_login_flow(tmp_path):
 def test_forged_session_cookie_rejected(tmp_path):
     c = _client(tmp_path)
     c.cookies.set("aim_admin", "9999999999.deadbeef")
-    assert "Logga in" in c.get("/").text
+    assert "Logga in" in c.get("/admin").text
     assert c.get("/api/admin/stats").status_code == 401
 
 
@@ -80,9 +80,44 @@ def test_session_unlocks_preview_product(tmp_path):
     c.post("/api/admin/login", json={"pin": settings.ADMIN_PIN})
     assert c.get("/api/admin/preview-product?endpoint=/api/v1/crypto-pulse").status_code == 200
     # Verify dashboard HTML contains logout button and /api/admin/logout clears session
-    assert "logoutAdmin()" in c.get("/").text
+    assert "logoutAdmin()" in c.get("/admin").text
     assert c.post("/api/admin/logout").status_code == 200
     assert c.get("/api/admin/preview-product").status_code == 401
+
+
+def test_public_landing_and_content_negotiation(tmp_path):
+    c = _client(tmp_path)
+    # Default HTML response for human browsers
+    r_html = c.get("/")
+    assert r_html.status_code == 200
+    assert "AIM Network" in r_html.text
+    assert "Autonomous Machine-to-Machine" in r_html.text
+    assert "/admin" in r_html.text
+
+    # Content negotiation: Accept: application/json returns discovery manifest
+    r_json = c.get("/", headers={"Accept": "application/json"})
+    assert r_json.status_code == 200
+    data = r_json.json()
+    assert "AIM Network" in data["name"]
+    assert "endpoints" in data
+    assert "/llms.txt" in data["catalogs"]["llms_txt"]
+
+
+def test_head_requests_and_scanner_block(tmp_path):
+    c = _client(tmp_path)
+    # HEAD requests on discovery and health routes
+    assert c.head("/").status_code == 200
+    assert c.head("/health").status_code == 200
+    assert c.head("/llms.txt").status_code == 200
+    assert c.head("/agents.json").status_code == 200
+
+    # Scanner blocking: .php and .env paths return fast 404 Not Found without route dispatch
+    res_php = c.get("/wp-login.php")
+    assert res_php.status_code == 404
+    assert res_php.json()["detail"] == "Not Found"
+
+    res_env = c.get("/.env")
+    assert res_env.status_code == 404
 
 
 def test_traffic_log_30_day_retention_policy(tmp_path):

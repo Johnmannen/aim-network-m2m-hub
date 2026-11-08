@@ -88,6 +88,37 @@ def create_app(db_path: str | None = None) -> FastAPI:
         has_admin_cookie = bool(request.cookies.get("aim_admin"))
         db_override = getattr(request.app.state, "db_path", None)
 
+        # 1. Fast block for vulnerability scanners (.php, /wp-, .svn, etc.)
+        path_lower = request.url.path.lower()
+        if (
+            path_lower.endswith((".php", ".asp", ".aspx", ".jsp"))
+            or any(s in path_lower for s in ("/wp-", "/.svn", "/.git", "/.env", "/.hg", "/hellopress"))
+        ):
+            elapsed_ms = (time.perf_counter() - t0) * 1000.0
+            log_traffic_event(
+                path=request.url.path,
+                method=request.method,
+                status_code=404,
+                user_agent=user_agent,
+                country=country,
+                latency_ms=elapsed_ms,
+                has_admin_cookie=has_admin_cookie,
+                db_path=db_override,
+            )
+            return JSONResponse(status_code=404, content={"detail": "Not Found"})
+
+        # 2. Canonical redirect if accessed via direct onrender.com host (except health check)
+        host = request.headers.get("Host", "").split(":")[0].lower()
+        if host == "aim-network-m2m-hub.onrender.com" and request.url.path not in ("/health", "/favicon.ico"):
+            canonical_target = f"https://johngarp.click{request.url.path}"
+            if request.url.query:
+                canonical_target += f"?{request.url.query}"
+            return JSONResponse(
+                status_code=308,
+                headers={"Location": canonical_target},
+                content={"redirect": canonical_target},
+            )
+
         now = time.monotonic()
         # Prune stale IP keys every 120 seconds or if map exceeds 2,000 keys
         if (now - last_prune_ts[0]) > 120.0 or len(ip_hits) > 2000:
@@ -153,7 +184,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
-        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_methods=["GET", "POST", "OPTIONS", "HEAD"],
         allow_headers=[
             "Content-Type",
             "X-PAYMENT-PROOF",
@@ -169,7 +200,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
     app.include_router(discovery_router)
     app.include_router(api_v1_router)
 
-    @app.get("/health", tags=["System"])
+    @app.api_route("/health", methods=["GET", "HEAD"], tags=["System"])
     async def health_check():
         return {
             "status": "healthy",

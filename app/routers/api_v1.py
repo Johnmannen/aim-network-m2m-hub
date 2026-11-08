@@ -18,19 +18,30 @@ from app.x402 import require_x402_payment
 router = APIRouter(prefix="/api/v1", tags=["M2M Paid Data Endpoints"])
 
 
-@router.get("/free-teaser")
-async def get_free_teaser():
+@router.api_route("/free-teaser", methods=["GET", "HEAD"])
+async def get_free_teaser(request: Request):
     """
     Free Zero-Auth Verification Teaser ($0.00 USDC):
     Allows autonomous buying bots to verify <150ms latency and live data freshness before paying via x402.
     """
     pulse = await fetch_crypto_pulse_data()
-    return {
+    teaser_data = {
         "status": "LIVE_FEED_VERIFIED",
         "price_usdc": 0.0,
         "timestamp": pulse["timestamp"],
         "btc_spot_preview_usd": pulse["assets"]["BTC"]["price_usd"],
         "market_sentiment_preview": pulse["market_sentiment"],
+        "schema_sample": {
+            "crypto_pulse": {
+                "assets": {"BTC": {"price_usd": 89450.0, "change_24h_pct": 1.2, "volume_24h_usd": 45000000000}},
+                "volatility_index": {"level": "MODERATE", "score": 42.5},
+                "market_sentiment": "bullish",
+            },
+            "base_dex_radar": {
+                "top_pairs": [{"pair": "WETH/USDC", "dex": "aerodrome", "volume_24h_usd": 12000000, "whale_net_inflow_usd": 450000}],
+                "whale_signals": ["AERODROME_HIGH_LIQUIDITY_DEPTH"],
+            },
+        },
         "locked_premium_fields": [
             "ETH & SOL 24h volume & volatility matrix (/api/v1/crypto-pulse -> 0.01 USDC)",
             "Base L2 DEX Whale Liquidity & Top Pools (/api/v1/base-dex-radar -> 0.05 USDC)",
@@ -38,10 +49,15 @@ async def get_free_teaser():
             "24h All-Access VIP Pass (1,000 calls across all endpoints -> 2.00 USDC)",
         ],
         "payment_recipient_base_usdc": settings.WALLET_ADDRESS,
+        "x402_network": "base-mainnet (Chain ID 8453)",
     }
+    if request.method == "HEAD":
+        from fastapi.responses import Response
+        return Response(status_code=200, media_type="application/json")
+    return teaser_data
 
 
-@router.get("/base-dex-radar")
+@router.api_route("/base-dex-radar", methods=["GET", "HEAD"])
 async def get_base_dex_radar(request: Request):
     """
     Base L2 DEX Liquidity & Whale Inflow Radar ($0.05 USDC):
@@ -61,7 +77,7 @@ async def get_base_dex_radar(request: Request):
     return await fetch_base_dex_radar()
 
 
-@router.get("/crypto-pulse")
+@router.api_route("/crypto-pulse", methods=["GET", "HEAD"])
 async def get_crypto_pulse(request: Request):
     """
     Tier 1 Micro-API ($0.01 USDC):
@@ -81,7 +97,7 @@ async def get_crypto_pulse(request: Request):
     return await fetch_crypto_pulse_data()
 
 
-@router.get("/deep-market-report")
+@router.api_route("/deep-market-report", methods=["GET", "HEAD"])
 async def get_deep_market_report(request: Request):
     """
     Tier 2 Premium-API ($1.00 USDC):
@@ -101,7 +117,7 @@ async def get_deep_market_report(request: Request):
     return await fetch_deep_market_report()
 
 
-@router.get("/trending/{slug}")
+@router.api_route("/trending/{slug}", methods=["GET", "HEAD"])
 async def get_dynamic_trending_endpoint(slug: str, request: Request):
     """
     Auto-Deployed Scout Endpoint ($0.05 USDC):

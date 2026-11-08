@@ -146,10 +146,10 @@ def init_db(db_path: Optional[str] = None) -> None:
                 """,
                 (
                     "Base L2 DEX Liquidity & Whale Inflows",
-                    "/api/v1/base-whale-radar",
+                    "/api/v1/base-dex-radar",
                     0.05,
                     "Hög efterfrågan från autonoma trading-botar på Base efter realtidsflöden i USDC-pooler.",
-                    "QUEUED_FOR_AUTOPILOT",
+                    "LIVE_AUTO_DEPLOYED",
                     now,
                 ),
             )
@@ -165,7 +165,7 @@ def get_stats(db_path: Optional[str] = None) -> Dict[str, Any]:
             "SELECT * FROM discovery_logs ORDER BY id DESC LIMIT 8;"
         ).fetchall()
         dynamic_eps = conn.execute(
-            "SELECT * FROM dynamic_endpoints ORDER BY created_at DESC LIMIT 12;"
+            "SELECT * FROM dynamic_endpoints ORDER BY created_at DESC LIMIT 24;"
         ).fetchall()
         vip_rows = conn.execute(
             "SELECT * FROM vip_passes ORDER BY created_at DESC LIMIT 10;"
@@ -225,6 +225,7 @@ def get_stats(db_path: Optional[str] = None) -> Dict[str, Any]:
         quotes_402 = int(funnel_map.get("QUOTE_402", 0))
         paid_200 = int(funnel_map.get("PAID_200", 0))
         blocked_hits = int(funnel_map.get("BLOCKED", 0))
+        scanner_hits = int(funnel_map.get("SCANNER", 0))
         total_external = int(avg_lat_row["total_req"] or 0)
         avg_latency_ms = round(float(avg_lat_row["avg_ms"] or 0.0), 1)
         conversion_pct = (
@@ -250,6 +251,7 @@ def get_stats(db_path: Optional[str] = None) -> Dict[str, Any]:
                 "quotes_402": quotes_402,
                 "paid_200": paid_200,
                 "blocked_hits": blocked_hits,
+                "scanner_hits": scanner_hits,
                 "conversion_rate_pct": conversion_pct,
                 "avg_latency_ms": avg_latency_ms,
                 "agent_breakdown": [dict(r) for r in agent_breakdown_rows],
@@ -399,6 +401,15 @@ def register_dynamic_endpoint(
                 clean_price,
                 now,
             ),
+        )
+        # Prune oldest unused endpoints if exceeding 12 items (never delete active ones with calls_count > 0)
+        conn.execute(
+            """
+            DELETE FROM dynamic_endpoints
+            WHERE calls_count = 0 AND slug NOT IN (
+                SELECT slug FROM dynamic_endpoints ORDER BY created_at DESC LIMIT 12
+            );
+            """
         )
         conn.commit()
         row = conn.execute(
@@ -559,20 +570,33 @@ def log_traffic_event(
     init_db(db_path)
 
     ua_lower = (user_agent or "").lower()
+    path_lower = path.lower()
     is_internal = (
         1
         if (
-            path in ("/", "/health", "/favicon.ico")
+            path in ("/admin", "/health", "/favicon.ico")
             or path.startswith("/api/admin")
             or "aim-keepalive" in ua_lower
             or "aim-internal-probe" in ua_lower
+            or "aim-dashboard" in ua_lower
             or has_admin_cookie
         )
         else 0
     )
 
+    # Skip logging repetitive 200 OK internal admin polls or health checks into traffic_logs
+    if is_internal and status_code == 200 and path in ("/admin", "/health", "/favicon.ico"):
+        return
+
+    is_scanner = (
+        path_lower.endswith((".php", ".asp", ".aspx", ".jsp"))
+        or any(s in path_lower for s in ("/wp-", "/.svn", "/.git", "/.env", "/.hg", "/hellopress"))
+    )
+
     if status_code == 402:
         category = "QUOTE_402"
+    elif is_scanner:
+        category = "SCANNER"
     elif status_code in (401, 403, 429, 503):
         category = "BLOCKED"
     elif (
@@ -582,6 +606,7 @@ def log_traffic_event(
     ):
         category = "PAID_200"
     elif path in (
+        "/",
         "/llms.txt",
         "/agents.json",
         "/.well-known/agent.json",
@@ -598,7 +623,11 @@ def log_traffic_event(
     else:
         category = "OTHER"
 
-    if "simulerad test-bot" in (user_agent or "").lower():
+    if is_scanner:
+        agent_label = "🔍 Vulnerability Scanner"
+    elif "glama" in ua_lower or "smithery" in ua_lower or (path == "/mcp" and "node" in ua_lower):
+        agent_label = "🌐 MCP Directory (Glama)"
+    elif "simulerad test-bot" in (user_agent or "").lower():
         agent_label = "🧪 Simulerad Test-Bot (Admin)"
     else:
         agent_label = classify_user_agent(user_agent)

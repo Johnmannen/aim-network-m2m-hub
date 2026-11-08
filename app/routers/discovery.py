@@ -25,13 +25,13 @@ from app.services.scout import run_autonomous_scout
 router = APIRouter(tags=["AI Discovery & Autonomous Scout"])
 
 
-@router.get("/llms.txt", response_class=PlainTextResponse)
+@router.api_route("/llms.txt", methods=["GET", "HEAD"], response_class=PlainTextResponse)
 async def llms_txt_manifest(request: Request) -> str:
     """Machine-readable Markdown manifest for LLM crawlers and autonomous buying agents."""
     db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
     stats = get_stats(db_override)
     dynamic_lines = ""
-    idx = 3
+    idx = 4
     for ep in stats.get("dynamic_endpoints", []):
         dynamic_lines += (
             f"{idx}. `GET {ep['endpoint_path']}`\n"
@@ -81,10 +81,26 @@ async def llms_txt_manifest(request: Request) -> str:
 - MCP Server Manifest & JSON-RPC: `/mcp`
 - A2A Agent Card: `/.well-known/agent.json`
 - OpenAPI Schema: `/openapi.json`
+
+## Python Agent Quickstart (Zero-Auth x402)
+```python
+import httpx
+
+# 1. Probe free teaser to verify freshness & latency
+r = httpx.get("https://johngarp.click/api/v1/free-teaser")
+print("Live status:", r.json()["status"])
+
+# 2. Query paid feed via standard x402 header (or legacy tx-hash)
+# headers = {{"X-PAYMENT": "<base64_signed_eip3009_payload>"}}
+# Or send 0.01 USDC on Base and pass transaction hash:
+headers = {{"X-PAYMENT-PROOF": "<0x_base_transaction_hash>"}}
+res = httpx.get("https://johngarp.click/api/v1/crypto-pulse", headers=headers)
+print(res.json())
+```
 """
 
 
-@router.get("/robots.txt", response_class=PlainTextResponse)
+@router.api_route("/robots.txt", methods=["GET", "HEAD"], response_class=PlainTextResponse)
 async def robots_txt() -> str:
     """Explicitly invite all AI search crawlers, M2M agents, and indexers."""
     return """User-agent: *
@@ -98,7 +114,7 @@ Sitemap: https://johngarp.click/sitemap.xml
 """
 
 
-@router.get("/sitemap.xml")
+@router.api_route("/sitemap.xml", methods=["GET", "HEAD"])
 async def sitemap_xml(request: Request):
     """Dynamic XML sitemap for search engines and AI directory crawlers."""
     from fastapi.responses import Response
@@ -122,7 +138,7 @@ async def sitemap_xml(request: Request):
     return Response(content=xml, media_type="application/xml")
 
 
-@router.get("/agents.json", response_class=JSONResponse)
+@router.api_route("/agents.json", methods=["GET", "HEAD"], response_class=JSONResponse)
 async def agents_json_manifest(request: Request) -> dict:
     """Standardized x402 & M2M agent catalog (includes auto-deployed Scout endpoints)."""
     db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
@@ -213,7 +229,7 @@ async def agents_json_manifest(request: Request) -> dict:
     }
 
 
-@router.get("/.well-known/agent.json", response_class=JSONResponse)
+@router.api_route("/.well-known/agent.json", methods=["GET", "HEAD"], response_class=JSONResponse)
 async def well_known_agent_card(request: Request) -> dict:
     """A2A-compatible Agent Card for autonomous multi-agent ecosystems."""
     return await agents_json_manifest(request)
@@ -419,6 +435,14 @@ async def mcp_server_endpoint(request: Request) -> Response:
                         "network": "base-mainnet (Chain ID 8453)",
                         "token_contract": settings.USDC_CONTRACT_ADDRESS,
                         "recipient_wallet": settings.WALLET_ADDRESS,
+                        "x402_standard": {
+                            "scheme": "exact",
+                            "network": "base",
+                            "amount_micro_usdc": str(int(Decimal(str(ep_price)) * Decimal(10**6))),
+                            "header_v1": "X-PAYMENT",
+                            "header_v2": "PAYMENT-SIGNATURE",
+                            "facilitator": settings.X402_FACILITATOR_URL or "https://facilitator.payai.network",
+                        },
                         "header": "X-PAYMENT-PROOF: <0x_base_tx_hash>",
                     }
                     return JSONResponse(

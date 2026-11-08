@@ -513,18 +513,30 @@
             }
         }
 
-        // Auto-refresh Dashboard var 30:e sekund via fetch så sidan uppdateras mjukt utan att tappa scroll-position
-        setInterval(async () => {
-            try {
-                const r = await fetch(window.location.href, { cache: "no-store" });
-                if (r.ok && document.getElementById("productInspectorBox").style.display !== "block") {
-                    const html = await r.text();
-                    const parser = new DOMParser();
-                    const doc = parser.parseFromString(html, "text/html");
-                    document.body.innerHTML = doc.body.innerHTML;
-                }
-            } catch (e) {}
-        }, 15000);
+        // Auto-refresh Dashboard var 45:e sekund endast när fliken är aktiv (visibilityState === 'visible')
+        let refreshTimer = null;
+        function scheduleRefresh() {
+            if (refreshTimer) clearInterval(refreshTimer);
+            refreshTimer = setInterval(async () => {
+                if (document.hidden) return;
+                try {
+                    const r = await fetch(window.location.href, {
+                        cache: "no-store",
+                        headers: { "X-Internal-Poll": "1", "User-Agent": "aim-dashboard-poll" }
+                    });
+                    if (r.ok && document.getElementById("productInspectorBox").style.display !== "block") {
+                        const html = await r.text();
+                        const parser = new DOMParser();
+                        const doc = parser.parseFromString(html, "text/html");
+                        document.body.innerHTML = doc.body.innerHTML;
+                    }
+                } catch (e) {}
+            }, 45000);
+        }
+        document.addEventListener("visibilitychange", () => {
+            if (!document.hidden) scheduleRefresh();
+        });
+        scheduleRefresh();
     </script>
 </body>
 </html>
