@@ -12,6 +12,7 @@ from collections import defaultdict
 from contextlib import asynccontextmanager
 import logging
 import time
+import uuid
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
@@ -42,6 +43,7 @@ async def _autopilot_scout_loop(db_path: str | None) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.started_at = time.time()
+    app.state.instance_id = f"inst_{uuid.uuid4().hex[:12]}"
     db_override = getattr(app.state, "db_path", None)
     init_db(db_override)
     app.state.http_client = httpx.AsyncClient(timeout=5.0)

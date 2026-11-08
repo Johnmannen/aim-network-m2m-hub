@@ -176,7 +176,13 @@ async def fetch_crypto_pulse_data() -> Dict[str, Any]:
     sol_parkinson = float(prices.get("solana", {}).get("parkinson_volatility_pct", 0.0) or 0.0)
     mean_parkinson = round((btc_parkinson + eth_parkinson + sol_parkinson) / 3.0, 2)
     vol_classification = (
-        "LOW (<1.5%)" if mean_parkinson < 1.5 else ("MODERATE (1.5-4.0%)" if mean_parkinson < 4.0 else "HIGH (>4.0%)")
+        None
+        if mean_parkinson <= 0.0
+        else (
+            "LOW (<1.5%)"
+            if mean_parkinson < 1.5
+            else ("MODERATE (1.5-4.0%)" if mean_parkinson < 4.0 else "HIGH (>4.0%)")
+        )
     )
     now_iso = datetime.now(timezone.utc).isoformat()
     latency_ms = round((time.perf_counter() - start_perf) * 1000, 1)
@@ -556,19 +562,31 @@ async def fetch_trending_dex_tokens() -> Dict[str, Any]:
     source_label = "dexscreener_base_live"
     is_live = False
     all_pairs = []
+    fallback_reason = None
 
     addrs_str = ",".join(t["token_address"] for t in tokens_config)
     url = f"https://api.dexscreener.com/latest/dex/tokens/{addrs_str}"
-    headers = {"User-Agent": "AIMNetwork-M2M/1.1 (https://johngarp.click; ops@johngarp.click)"}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
 
     try:
-        async with httpx.AsyncClient(timeout=6.0, headers=headers) as client:
+        async with httpx.AsyncClient(timeout=8.0, headers=headers, follow_redirects=True) as client:
             resp = await client.get(url)
             if resp.status_code == 200:
-                all_pairs = resp.json().get("pairs", [])
-                if all_pairs:
+                raw_pairs = resp.json().get("pairs")
+                if raw_pairs and isinstance(raw_pairs, list):
+                    all_pairs = raw_pairs
                     is_live = True
+                else:
+                    fallback_reason = "DexScreener returned empty pairs list"
+            else:
+                fallback_reason = f"DexScreener HTTP {resp.status_code}"
+                logger.warning("DexScreener multi-token live fetch non-200: %d", resp.status_code)
     except Exception as exc:
+        fallback_reason = f"DexScreener fetch error: {type(exc).__name__}"
         logger.warning("DexScreener multi-token live fetch failed: %s", exc)
 
     if not is_live:
@@ -594,13 +612,17 @@ async def fetch_trending_dex_tokens() -> Dict[str, Any]:
                 "dex": fb["dex"],
                 "is_stale": True,
             })
-        return {
+        fallback_payload = {
             "tokens": fetched_tokens,
             "data_as_of": None,
             "data_age_seconds": None,
+            "_fetched_ts": now_ts,
             "source": source_label,
             "is_stale": True,
+            "fallback_reason": fallback_reason,
         }
+        _set_cached(cache_key, fallback_payload)
+        return fallback_payload
 
     for item in tokens_config:
         addr = item["token_address"].lower()
@@ -618,16 +640,17 @@ async def fetch_trending_dex_tokens() -> Dict[str, Any]:
             vol = round(float(chosen_pair.get("volume", {}).get("h24", 0.0) or 0.0), 2)
             mom = round(float(chosen_pair.get("priceChange", {}).get("h24", 0.0) or 0.0), 2)
             dex_id = chosen_pair.get("dexId", "aerodrome").capitalize()
-            created_at_ms = next((p.get("pairCreatedAt") for p in token_pairs if p.get("pairCreatedAt")), None)
+            # V4: Use ONLY chosen pair's created timestamp; omit/null if not reported by this pool
+            created_at_ms = chosen_pair.get("pairCreatedAt")
             if created_at_ms:
                 age_days = max(1, int((now_ts * 1000 - created_at_ms) / (86400 * 1000)))
             else:
-                age_days = item["fallback"]["pool_age_days"]
+                age_days = None
         else:
             liq = item["fallback"]["liquidity_usd"]
             vol = item["fallback"]["volume_24h_usd"]
             mom = item["fallback"]["momentum_24h_pct"]
-            age_days = item["fallback"]["pool_age_days"]
+            age_days = None
             dex_id = "Aerodrome"
 
         liq_class = (
@@ -660,6 +683,7 @@ async def fetch_trending_dex_tokens() -> Dict[str, Any]:
         "_fetched_ts": now_ts,
         "source": source_label,
         "is_stale": False,
+        "fallback_reason": None,
     }
     _set_cached(cache_key, cache_payload)
     return {
@@ -668,6 +692,7 @@ async def fetch_trending_dex_tokens() -> Dict[str, Any]:
         "data_age_seconds": 0,
         "source": source_label,
         "is_stale": False,
+        "fallback_reason": None,
     }
 
 

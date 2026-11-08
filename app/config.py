@@ -79,6 +79,7 @@ class Settings:
     PRICE_DEX_RADAR_DEC: Decimal = Decimal("0.05")
     PRICE_PREMIUM_DEC: Decimal = Decimal("1.00")
     PRICE_VIP_24H_DEC: Decimal = Decimal("2.00")
+    PRO_PASS_PRICE_DEC: Decimal = Decimal("10.00")
 
     PRICE_MICRO_USDC: float = float(PRICE_MICRO_DEC)
     PRICE_DYNAMIC_USDC: float = float(PRICE_DYNAMIC_DEC)
@@ -89,7 +90,7 @@ class Settings:
     VIP_PASS_MAX_CALLS: int = 500
     VIP_PASS_DURATION_HOURS: int = 24
 
-    PRO_PASS_PRICE_USDC: float = 10.0
+    PRO_PASS_PRICE_USDC: float = float(PRO_PASS_PRICE_DEC)
     PRO_PASS_MAX_CALLS: int = 50
     PRO_PASS_DURATION_HOURS: int = 24
 

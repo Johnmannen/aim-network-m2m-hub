@@ -483,6 +483,23 @@ def check_and_use_vip_pass(
         return dict(updated)
 
 
+def get_vip_pass(
+    tx_hash: str, db_path: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    """Retrieve an existing VIP pass record by tx_hash without modifying call count."""
+    init_db(db_path)
+    normalized = tx_hash.strip().lower()
+    with get_connection(db_path) as conn:
+        row = conn.execute(
+            "SELECT * FROM vip_passes WHERE tx_hash = ?;", (normalized,)
+        ).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        d["tier"] = "pro" if float(d["amount_usdc"]) >= 10.0 else "micro"
+        return d
+
+
 def create_vip_pass(
     tx_hash: str,
     amount_usdc: float | Decimal,
@@ -537,7 +554,9 @@ def create_vip_pass(
         row = conn.execute(
             "SELECT * FROM vip_passes WHERE tx_hash = ?;", (normalized,)
         ).fetchone()
-        return dict(row)
+        result = dict(row)
+        result["tier"] = pass_tier
+        return result
 
 
 def is_first_time_buyer(payer_address: str, db_path: Optional[str] = None) -> bool:
@@ -595,7 +614,9 @@ def grant_welcome_bonus_pass(
         row = conn.execute(
             "SELECT * FROM vip_passes WHERE tx_hash = ?;", (normalized,)
         ).fetchone()
-        return dict(row)
+        result = dict(row)
+        result["tier"] = "micro"
+        return result
 
 
 def classify_user_agent(user_agent: str) -> str:

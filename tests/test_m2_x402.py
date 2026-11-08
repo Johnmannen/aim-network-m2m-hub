@@ -251,3 +251,142 @@ def test_vip_pass_quota_pro_vs_micro(tmp_path: Path):
     assert pro_pass["amount_usdc"] == 10.0
 
 
+@pytest.mark.anyio
+async def test_verify_base_usdc_with_return_amount(monkeypatch):
+    """verify_base_usdc_transaction(return_amount=True) returns actual transferred USDC float."""
+    recipient_wallet = "0x89205A3A3b2A69De6Dbf7f01ED13B2108B2c43e7".lower()
+    padded_recipient = "0x" + recipient_wallet.replace("0x", "").rjust(64, "0").lower()
+    payer_address = "0xde0b295669a9fd93d5f28d9ec85e40f4cb697bae"
+    padded_payer = "0x" + payer_address.replace("0x", "").rjust(64, "0").lower()
+    tx_hash = "0x" + "a" * 64
+
+    # 10 USDC = 10,000,000 micro-USDC = 0x989680
+    mock_receipt = {
+        "status": "0x1",
+        "blockNumber": "0x100",
+        "logs": [
+            {
+                "address": settings.USDC_CONTRACT_ADDRESS.lower(),
+                "topics": [
+                    ERC20_TRANSFER_TOPIC,
+                    padded_payer,
+                    padded_recipient,
+                ],
+                "data": hex(10_000_000),
+            }
+        ],
+    }
+
+    class MockResponse:
+        def __init__(self, data):
+            self._data = data
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"jsonrpc": "2.0", "id": 1, "result": self._data}
+
+    async def mock_post(self, url, json=None, timeout=None):
+        method = json.get("method")
+        if method == "eth_getTransactionReceipt":
+            return MockResponse(mock_receipt)
+        if method == "eth_getBlockByNumber":
+            return MockResponse({"timestamp": hex(int(time.time()))})
+        return MockResponse({})
+
+    monkeypatch.setattr("httpx.AsyncClient.post", mock_post)
+
+    is_valid, payer, reason, amount = await verify_base_usdc_transaction(
+        tx_hash=tx_hash,
+        expected_amount_usdc=2.00,
+        recipient_wallet=recipient_wallet,
+        return_amount=True,
+    )
+    assert is_valid is True
+    assert payer == payer_address
+    assert amount == 10.0
+
+
+@pytest.mark.anyio
+async def test_require_x402_payment_pro_pass_flow(monkeypatch, tmp_path: Path):
+    """A 10 USDC on-chain transfer creates a Pro VIP pass (50 calls) and unlocks premium tier."""
+    import time
+    from fastapi import Request
+    from app.x402 import require_x402_payment
+    from app.database import get_vip_pass
+
+    db_file = str(tmp_path / "test_vip_onchain.db")
+    recipient_wallet = settings.WALLET_ADDRESS.lower()
+    padded_recipient = "0x" + recipient_wallet.replace("0x", "").rjust(64, "0").lower()
+    payer_address = "0x1111111111111111111111111111111111111111"
+    padded_payer = "0x" + payer_address.replace("0x", "").rjust(64, "0").lower()
+    tx_hash = "0x" + "b" * 64
+
+    # 10 USDC = 10,000,000 micro-USDC
+    mock_receipt = {
+        "status": "0x1",
+        "blockNumber": "0x100",
+        "logs": [
+            {
+                "address": settings.USDC_CONTRACT_ADDRESS.lower(),
+                "topics": [
+                    ERC20_TRANSFER_TOPIC,
+                    padded_payer,
+                    padded_recipient,
+                ],
+                "data": hex(10_000_000),
+            }
+        ],
+    }
+
+    class MockResponse:
+        def __init__(self, data):
+            self._data = data
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"jsonrpc": "2.0", "id": 1, "result": self._data}
+
+    async def mock_post(self, url, json=None, timeout=None):
+        method = json.get("method")
+        if method == "eth_getTransactionReceipt":
+            return MockResponse(mock_receipt)
+        if method == "eth_getBlockByNumber":
+            return MockResponse({"timestamp": hex(int(time.time()))})
+        return MockResponse({})
+
+    monkeypatch.setattr("httpx.AsyncClient.post", mock_post)
+
+    scope = {
+        "type": "http",
+        "method": "GET",
+        "path": "/api/v1/deep-market-report",
+        "headers": [(b"x-payment-proof", tx_hash.encode())],
+        "query_string": b"",
+        "app": type("App", (), {"state": type("State", (), {"http_client": None, "db_path": db_file})()})(),
+    }
+    req = Request(scope)
+
+    # Calling premium endpoint ($1.00) with 10 USDC proof -> creates Pro pass and returns None (success!)
+    resp = await require_x402_payment(
+        request=req,
+        price_usdc=1.00,
+        description="Deep Market Report",
+        tier="premium",
+        db_path=db_file,
+    )
+    assert resp is None
+
+    # Verify Pro pass was stored in SQLite
+    pass_record = get_vip_pass(tx_hash, db_path=db_file)
+    assert pass_record is not None
+    assert pass_record["tier"] == "pro"
+    assert pass_record["amount_usdc"] == 10.0
+    assert pass_record["max_calls"] == 50
+    assert pass_record["calls_used"] == 1
+
+
+

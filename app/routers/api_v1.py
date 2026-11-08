@@ -5,7 +5,7 @@ Protected by x402 Payment Protocol on Base L2.
 
 from datetime import datetime, timezone
 from decimal import Decimal
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse, Response
 from app.config import settings
 from app.database import get_stats, increment_dynamic_endpoint_stats
@@ -171,12 +171,55 @@ async def list_trending_tokens(request: Request):
         "trending_assets": tokens,
         "meta": {
             "source": source_status,
+            "fallback_reason": trending_feed.get("fallback_reason"),
             "liquidity_classification_standard": "DEEP_LIQUIDITY (liq > $500k & 24h vol > $100k), MODERATE_LIQUIDITY (liq > $100k), LOW_LIQUIDITY (liq < $100k)",
             "momentum_metric": "24-hour price change percentage on primary DEX pool via DexScreener",
             "pool_age_metric": "Days elapsed since primary liquidity pair deployment on Base L2",
             "disclaimer": "Informational quantitative market data only. Not financial, trading, or investment advice.",
         },
     })
+
+
+@router.api_route(
+    "/vip-pass",
+    methods=["GET", "HEAD"],
+    openapi_extra={
+        "x-payment-protocol": "x402-vip",
+        "x-price-usdc": float(settings.PRICE_VIP_24H_DEC),
+    },
+)
+async def vip_pass_status_or_quote(
+    request: Request,
+    tx_hash: str | None = Query(default=None),
+):
+    """
+    Inspect 24h VIP Pass status and remaining calls.
+    Provide pass tx_hash via query parameter (?tx_hash=0x...) or X-PAYMENT-PROOF header.
+    Without a valid pass, returns x402 machine-readable pricing and purchase instructions.
+    """
+    if request.method == "HEAD":
+        return Response(status_code=200, media_type="application/json")
+
+    proof = (tx_hash or request.headers.get("X-PAYMENT-PROOF", "")).strip()
+    db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
+    if proof:
+        from app.database import get_vip_pass
+        pass_data = get_vip_pass(proof, db_path=db_override)
+        if pass_data:
+            remaining = max(0, pass_data["max_calls"] - pass_data["calls_used"])
+            return JSONResponse({
+                "status": "active" if remaining > 0 else "exhausted",
+                "calls_remaining": remaining,
+                "vip_pass": pass_data,
+            })
+        return JSONResponse(status_code=404, content={"error": "VIP pass not found for the provided transaction hash."})
+
+    from app.x402 import build_402_response
+    return build_402_response(
+        price_usdc=settings.PRICE_VIP_24H_DEC,
+        description=f"24h VIP Pass: Micro ({settings.PRICE_VIP_24H_DEC} USDC / {settings.VIP_PASS_MAX_CALLS} calls) or Pro ({settings.PRO_PASS_PRICE_DEC} USDC / {settings.PRO_PASS_MAX_CALLS} calls)",
+        resource_url=str(request.url),
+    )
 
 
 @router.api_route(

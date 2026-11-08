@@ -12,6 +12,7 @@ import asyncio
 import functools
 import logging
 import re
+import time
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Dict, Optional, Tuple
 import httpx
@@ -87,11 +88,31 @@ def build_402_response(
             "recipient": settings.WALLET_ADDRESS,
             "description": description,
             "vip_24h_pass_option": {
-                "amount": vip_str,
+                "amount": f"{settings.PRICE_VIP_24H_DEC:.2f}",
                 "description": (
-                    f"Pay {vip_str} USDC once to unlock a 24-hour Micro VIP Pass "
-                    f"({settings.VIP_PASS_MAX_CALLS} calls across all micro feeds ($0.01-$0.05) using the same tx_hash)."
+                    f"Pay {settings.PRICE_VIP_24H_DEC:.2f} USDC once to unlock a 24-hour Micro VIP Pass "
+                    f"({settings.VIP_PASS_MAX_CALLS} calls across micro feeds ($0.01-$0.05) using the same tx_hash)."
                 ),
+            },
+            "vip_24h_pass_options": {
+                "micro_pass": {
+                    "price_usdc": f"{settings.PRICE_VIP_24H_DEC:.2f}",
+                    "max_calls": settings.VIP_PASS_MAX_CALLS,
+                    "scope": "Micro feeds ($0.01-$0.05)",
+                    "description": (
+                        f"Pay {settings.PRICE_VIP_24H_DEC:.2f} USDC once to unlock a 24-hour Micro VIP Pass "
+                        f"({settings.VIP_PASS_MAX_CALLS} calls across micro feeds using the same tx_hash)."
+                    ),
+                },
+                "pro_pass": {
+                    "price_usdc": f"{settings.PRO_PASS_PRICE_DEC:.2f}",
+                    "max_calls": settings.PRO_PASS_MAX_CALLS,
+                    "scope": "All feeds including Deep Market Report ($1.00)",
+                    "description": (
+                        f"Pay {settings.PRO_PASS_PRICE_DEC:.2f} USDC once to unlock a 24-hour Pro VIP Pass "
+                        f"({settings.PRO_PASS_MAX_CALLS} calls across all feeds using the same tx_hash)."
+                    ),
+                },
             },
         },
         "free_live_teaser": teaser,
@@ -114,7 +135,8 @@ async def verify_base_usdc_transaction(
     recipient_wallet: Optional[str] = None,
     rpc_url: Optional[str] = None,
     http_client: Optional[httpx.AsyncClient] = None,
-) -> Tuple[bool, str, str]:
+    return_amount: bool = False,
+) -> Tuple[bool, str, str] | Tuple[bool, str, str, float]:
     """
     Verify an on-chain Base Mainnet transaction receipt via JSON-RPC:
     1. Confirms transaction status == 0x1 (succeeded)
@@ -122,18 +144,19 @@ async def verify_base_usdc_transaction(
     3. Confirms recipient matches configured wallet and transferred micro-USDC >= expected_units
 
     Returns:
-        (is_valid, payer_address, reason)
+        (is_valid, payer_address, reason) or (is_valid, payer_address, reason, actual_amount_usdc)
     """
+    def _fail(reason: str):
+        if return_amount:
+            return False, "", reason, 0.0
+        return False, "", reason
+
     target_wallet = (recipient_wallet or settings.WALLET_ADDRESS).lower()
     usdc_contract = settings.USDC_CONTRACT_ADDRESS.lower()
     endpoint_rpc = rpc_url or settings.BASE_RPC_URL
 
     if not TX_HASH_REGEX.match(tx_hash.strip()):
-        return (
-            False,
-            "",
-            "Invalid transaction hash format (expected 0x + 64 hex chars).",
-        )
+        return _fail("Invalid transaction hash format (expected 0x + 64 hex chars).")
 
     payload = {
         "jsonrpc": "2.0",
@@ -167,23 +190,21 @@ async def verify_base_usdc_transaction(
             continue
 
     if data is None:
-        return False, "", f"Base RPC communication error: {last_err}"
+        return _fail(f"Base RPC communication error: {last_err}")
 
     receipt = data.get("result")
     if not receipt:
-        return False, "", "Transaction receipt not found on Base Mainnet."
+        return _fail("Transaction receipt not found on Base Mainnet.")
 
     if receipt.get("status") != "0x1":
-        return False, "", "Transaction failed or reverted on-chain."
+        return _fail("Transaction failed or reverted on-chain.")
 
     min_conf = int(getattr(settings, "MIN_CONFIRMATIONS", 1))
     if min_conf > 1:
         raw_tx_block = receipt.get("blockNumber")
         if not raw_tx_block:
-            return (
-                False,
-                "",
-                f"Transaction is still pending / missing blockNumber (requires >= {min_conf} confirmations).",
+            return _fail(
+                f"Transaction is still pending / missing blockNumber (requires >= {min_conf} confirmations)."
             )
         tx_block = int(raw_tx_block, 16)
         block_payload = {
@@ -203,26 +224,14 @@ async def verify_base_usdc_transaction(
             b_resp.raise_for_status()
             b_data = b_resp.json()
             if not b_data or not b_data.get("result"):
-                return (
-                    False,
-                    "",
-                    "Unable to verify block confirmations (empty eth_blockNumber response).",
-                )
+                return _fail("Unable to verify block confirmations (empty eth_blockNumber response).")
             latest_block = int(b_data["result"], 16)
             confirmations = max(0, latest_block - tx_block + 1)
             if confirmations < min_conf:
-                return (
-                    False,
-                    "",
-                    f"Insufficient block confirmations ({confirmations}/{min_conf}).",
-                )
+                return _fail(f"Insufficient block confirmations ({confirmations}/{min_conf}).")
         except Exception as exc:
             logger.warning("Block confirmation check failed (fail-closed): %s", exc)
-            return (
-                False,
-                "",
-                f"Unable to verify block confirmations via RPC: {exc}",
-            )
+            return _fail(f"Unable to verify block confirmations via RPC: {exc}")
 
     # P2: Check transaction freshness (prevent historical transfer scraping)
     max_tx_age_seconds = int(getattr(settings, "MAX_TX_AGE_SECONDS", 900))
@@ -248,10 +257,8 @@ async def verify_base_usdc_transaction(
                     import time
                     age_seconds = time.time() - block_ts
                     if age_seconds > max_tx_age_seconds:
-                        return (
-                            False,
-                            "",
-                            f"EXPIRED_TRANSACTION: On-chain transfer is {int(age_seconds)}s old (max allowed: {max_tx_age_seconds}s / 15 mins).",
+                        return _fail(
+                            f"EXPIRED_TRANSACTION: On-chain transfer is {int(age_seconds)}s old (max allowed: {max_tx_age_seconds}s / 15 mins)."
                         )
         except Exception as exc:
             logger.warning("Block timestamp age check failed: %s", exc)
@@ -272,12 +279,13 @@ async def verify_base_usdc_transaction(
             transferred_units = int(raw_data, 16)
             if transferred_units >= expected_units:
                 payer = "0x" + topics[1][-40:]
+                actual_amount = float(Decimal(transferred_units) / Decimal(1_000_000))
+                if return_amount:
+                    return True, payer, "Verified on Base Mainnet.", actual_amount
                 return True, payer, "Verified on Base Mainnet."
 
-    return (
-        False,
-        "",
-        f"No matching USDC transfer of >= {expected_amount_usdc} USDC to {target_wallet} found in receipt.",
+    return _fail(
+        f"No matching USDC transfer of >= {expected_amount_usdc} USDC to {target_wallet} found in receipt."
     )
 
 
@@ -387,15 +395,24 @@ async def require_x402_payment(
         verified_label = "hybrid_sandbox"
         payer_address = f"0x_test_{payment_proof.lower()}"
         if payment_proof.lower().startswith("test_vip_"):
+            is_pro_test = payment_proof.lower().startswith(("test_vip_pro_", "test_vip_10"))
+            amount = float(settings.PRO_PASS_PRICE_DEC) if is_pro_test else float(settings.PRICE_VIP_24H_DEC)
+            tier_label = "pro" if is_pro_test else "micro"
             try:
-                create_vip_pass(
+                created = create_vip_pass(
                     tx_hash=payment_proof,
-                    amount_usdc=float(settings.PRICE_VIP_24H_DEC),
+                    amount_usdc=amount,
                     payer_address=payer_address,
-                    tier="premium",
+                    tier=tier_label,
                     verified_mode=verified_label,
                     db_path=db_path,
                 )
+                if tier == "premium" and created.get("amount_usdc", 0.0) < 10.0:
+                    return _quote(
+                        price_usdc,
+                        description,
+                        error_message="Micro VIP Pass ($2.00) does not include Premium reports ($1.00). Pro Pass ($10.00) required.",
+                    )
                 return None
             except ValueError:
                 return _quote(
@@ -404,22 +421,33 @@ async def require_x402_payment(
                     error_message="VIP pass expired or call quota exhausted.",
                 )
     else:
-        # Check if caller paid >= $2.00 USDC for a new 24h VIP Pass
-        is_vip, vip_payer, _ = await verify_base_usdc_transaction(
+        # Check if caller paid >= $2.00 USDC for a new 24h VIP Pass (Micro >= 2.00, Pro >= 10.00)
+        verify_res = await verify_base_usdc_transaction(
             tx_hash=payment_proof,
             expected_amount_usdc=settings.PRICE_VIP_24H_DEC,
             http_client=shared_client,
+            return_amount=True,
         )
+        is_vip, vip_payer, _, transferred_usdc = verify_res
         if is_vip:
+            is_pro = transferred_usdc >= float(settings.PRO_PASS_PRICE_DEC)
+            pass_tier = "pro" if is_pro else "micro"
+            verified_mode = "onchain_vip_pro" if is_pro else "onchain_vip_micro"
             try:
-                create_vip_pass(
+                created = create_vip_pass(
                     tx_hash=payment_proof,
-                    amount_usdc=float(settings.PRICE_VIP_24H_DEC),
+                    amount_usdc=transferred_usdc,
                     payer_address=vip_payer,
-                    tier="premium",
-                    verified_mode="onchain_vip",
+                    tier=pass_tier,
+                    verified_mode=verified_mode,
                     db_path=db_path,
                 )
+                if tier == "premium" and created.get("amount_usdc", 0.0) < 10.0:
+                    return _quote(
+                        price_usdc,
+                        description,
+                        error_message="Micro VIP Pass ($2.00) does not include Premium reports ($1.00). Pro Pass ($10.00) required.",
+                    )
                 return None
             except ValueError:
                 return _quote(

@@ -841,8 +841,8 @@ async def refund_policy(request: Request):
         "settlement_policy": "Under standard x402 (EIP-3009 signed authorizations), payment transfer authorizations are verified cryptographically before service execution. Settlement is performed on-chain via the x402 facilitator.",
         "failed_requests_and_remedy": "Calls that fail during pre-check or verification are rejected immediately with HTTP 402 with zero charge. In the rare event of an unexpected server failure post-settlement, the transaction receipt in X-PAYMENT-RESPONSE serves as an immutable cryptographic receipt for immediate credit or direct refund via support@johngarp.click.",
         "legacy_onchain_proofs": {
-            "single_use_tokens": "On-chain transaction hashes submitted via X-PAYMENT-PROOF are recorded atomically in SQLite to guarantee single-use consumption and prevent replay vulnerabilities across agents.",
-            "vip_passes": f"24h VIP Passes allow up to {settings.VIP_PASS_MAX_CALLS} calls (Micro) or {settings.PRO_PASS_MAX_CALLS} calls (Pro). Passes are cryptographically tied to the verified on-chain sender address (from) to prevent unauthorized pass sharing.",
+            "single_use_tokens": "On-chain transaction hashes submitted via X-PAYMENT-PROOF are recorded atomically in SQLite per container instance to prevent concurrent replay attacks.",
+            "vip_passes": f"24h VIP Passes allow up to {settings.VIP_PASS_MAX_CALLS} calls (Micro >= 2.00 USDC) or {settings.PRO_PASS_MAX_CALLS} calls (Pro >= 10.00 USDC). VIP passes function as bearer tokens keyed by transaction hash with quotas tracked per container instance lifecycle. For non-repudiable cryptographically bound authorization, use standard x402 EIP-3009.",
             "outage_remedy": "In the event of an unserved request using an on-chain transaction hash, contact support@johngarp.click with the transaction hash to receive an immediate replacement VIP pass or equivalent credit.",
         },
         "dispute_contact": "support@johngarp.click (or open a public issue on GitHub: https://github.com/Johnmannen/aim-network-m2m-hub).",
@@ -857,8 +857,8 @@ async def refund_policy(request: Request):
         <p>{data['failed_requests_and_remedy']}</p>
         <h2>3. Legacy On-Chain Proofs & Pass Security</h2>
         <ul>
-          <li><strong>Single-Use Burn:</strong> {data['legacy_onchain_proofs']['single_use_tokens']}</li>
-          <li><strong>VIP Pass Wallet Binding:</strong> {data['legacy_onchain_proofs']['vip_passes']}</li>
+          <li><strong>Single-Use Burn (Instance Lifecycle):</strong> {data['legacy_onchain_proofs']['single_use_tokens']}</li>
+          <li><strong>VIP Pass Bearer Tokens:</strong> {data['legacy_onchain_proofs']['vip_passes']}</li>
           <li><strong>Outage Remedy:</strong> {data['legacy_onchain_proofs']['outage_remedy']}</li>
         </ul>
         <h2>4. Disputes & Support</h2>
@@ -878,26 +878,39 @@ async def service_status(request: Request):
     stats = get_stats(db_override)
 
     started_at = getattr(request.app.state, "started_at", None)
+    instance_id = getattr(request.app.state, "instance_id", "inst_standalone")
     now_ts = time.time()
     uptime_seconds = int(now_ts - started_at) if started_at else 0
     uptime_str = f"{uptime_seconds // 3600}h {(uptime_seconds % 3600) // 60}m {uptime_seconds % 60}s"
 
     from app.services.market_data import _get_cached
     dex_cached = _get_cached("trending_dex_tokens")
-    dex_status = "DEGRADED" if (dex_cached and dex_cached.get("is_stale")) else "HEALTHY"
+    if dex_cached is None:
+        dex_status = "UNKNOWN"
+    elif dex_cached.get("is_stale"):
+        dex_status = "DEGRADED"
+    else:
+        dex_status = "HEALTHY"
 
     pulse_cached = _get_cached("crypto_pulse")
-    coinbase_status = "HEALTHY" if (not pulse_cached or pulse_cached.get("meta", {}).get("status") == "LIVE_FEED_VERIFIED") else "DEGRADED"
+    if pulse_cached is None:
+        coinbase_status = "UNKNOWN"
+    elif pulse_cached.get("meta", {}).get("status") == "LIVE_FEED_VERIFIED":
+        coinbase_status = "HEALTHY"
+    else:
+        coinbase_status = "DEGRADED"
 
     data = {
         "status": "OPERATIONAL",
         "network": "Base Mainnet (Chain ID 8453)",
+        "instance_id": instance_id,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "uptime_metric": {
             "uptime_seconds": uptime_seconds,
             "uptime_human": uptime_str,
             "availability_target": "99.9% SLA target",
         },
+        "persistence_scope": "instance-local (SQLite WAL on ephemeral container SSD; resets on deployment/restart)",
         "storage_engine": "SQLite WAL on SSD Local Storage (/app/data/aim_network.db)",
         "sla_latency_targets": {
             "l1_cache_response": "<15ms (in-memory L1 cache)",
@@ -923,6 +936,8 @@ async def service_status(request: Request):
         <div class="meta">Status: <strong style="color: #4ade80;">{data['status']}</strong> &bull; Timestamp: {data['timestamp']}</div>
         <h2>System Overview</h2>
         <p><strong>Network:</strong> {data['network']}<br>
+        <strong>Instance ID:</strong> <code>{data['instance_id']}</code><br>
+        <strong>Persistence Scope:</strong> {data['persistence_scope']}<br>
         <strong>Storage Engine:</strong> {data['storage_engine']}<br>
         <strong>Instance Uptime:</strong> {data['uptime_metric']['uptime_human']} ({data['uptime_metric']['availability_target']})<br>
         <strong>Total Calls Processed:</strong> {data['stats_overview']['total_calls_served']}</p>
