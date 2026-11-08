@@ -460,6 +460,12 @@ def check_and_use_vip_pass(
         if now_dt >= expires_dt or row["calls_used"] >= row["max_calls"]:
             return None
 
+        # Margin Protection: Welcome Bonus (0.0) and Micro VIP passes (<10.0)
+        # apply only to micro ($0.01-$0.05) and dynamic_scout tiers.
+        # Premium tier ($1.00 Deep Market Report) requires Pro Pass (>=10.0) or standard payment.
+        if tier == "premium" and float(row["amount_usdc"]) < 10.0:
+            return None
+
         conn.execute(
             "UPDATE vip_passes SET calls_used = calls_used + 1 WHERE tx_hash = ?;",
             (normalized,),

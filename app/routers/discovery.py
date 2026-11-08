@@ -76,17 +76,22 @@ async def llms_txt_manifest(request: Request) -> str:
    - **Description:** Institutional M2M quantitative market regime, Base L2 liquidity metrics, and actionable trading signals JSON.
 {dynamic_lines}
 ## Welcome Bonus: First-Time Buyer Campaign (Buy 1, Get 5 Free)
-- New wallet addresses that make their first USDC purchase on ANY endpoint automatically unlock **5 FREE bonus calls** across ALL endpoints for 24 hours.
+- New wallet addresses that make their first USDC purchase on ANY endpoint automatically unlock **5 FREE bonus calls** across all micro feeds ($0.01-$0.05) for 24 hours.
 - Reuse the same `tx_hash` in `X-PAYMENT-PROOF: <tx_hash>` to consume your 5 bonus calls.
 
-## Volume Discount: 24-Hour VIP Pass (`{settings.PRICE_VIP_24H_USDC:.2f} USDC`)
-- Send `{settings.PRICE_VIP_24H_USDC:.2f} USDC` on Base to `{settings.WALLET_ADDRESS}` and reuse the same `X-PAYMENT-PROOF` transaction hash for up to **{settings.VIP_PASS_MAX_CALLS} calls across ALL endpoints for 24 hours**.
+## Volume Discount: 24-Hour VIP Passes
+- **24-Hour Micro VIP Pass (`{settings.PRICE_VIP_24H_USDC:.2f} USDC`):** Send `{settings.PRICE_VIP_24H_USDC:.2f} USDC` on Base to `{settings.WALLET_ADDRESS}` and reuse the same `X-PAYMENT-PROOF` transaction hash for up to **{settings.VIP_PASS_MAX_CALLS} calls across all micro feeds ($0.01-$0.05) for 24 hours**.
+- **24-Hour Pro VIP Pass (`10.00 USDC`):** Full 24h unlimited access to all endpoints including Deep Market Reports ($1.00) up to 500 calls.
 
 ## Machine Catalogs
 - Agent Catalog: `/agents.json`
 - MCP Server Manifest & JSON-RPC: `/mcp`
 - A2A Agent Card: `/.well-known/agent.json`
+- Trending Assets Index: `/api/v1/trending`
 - OpenAPI Schema: `/openapi.json`
+
+## Disclaimer
+> All feeds and signals provide quantitative informational market metrics only. Not financial, trading, or investment advice.
 
 ## Python Agent Quickstart (Zero-Auth x402)
 ```python
@@ -134,7 +139,10 @@ async def sitemap_xml(request: Request):
         f"{base}/agents.json",
         f"{base}/.well-known/agent.json",
         f"{base}/openapi.json",
+        f"{base}/api/v1/free-teaser",
+        f"{base}/api/v1/trending",
         f"{base}/api/v1/crypto-pulse",
+        f"{base}/api/v1/base-dex-radar",
         f"{base}/api/v1/deep-market-report",
     ]
     for ep in stats.get("dynamic_endpoints", []):
@@ -233,27 +241,108 @@ async def agents_json_manifest(request: Request) -> dict:
         "endpoints": endpoints,
         "promotions": {
             "first_time_buyer_bonus": {
-                "description": "Make 1 purchase, get 5 free bonus calls across all endpoints for 24h",
+                "name": "First-Time Buyer Welcome Bonus",
+                "description": "Make 1 purchase (from 0.01 USDC) and automatically get 5 free bonus calls across all micro feeds ($0.01-$0.05) for 24 hours.",
                 "bonus_calls": settings.WELCOME_BONUS_CALLS,
+                "eligible_tiers": ["micro", "dynamic_scout"],
                 "duration_hours": settings.WELCOME_BONUS_DURATION_HOURS,
             },
             "vip_24h_pass": {
+                "name": "24h Micro VIP Pass",
+                "description": "Unlimited calls (up to 1,000) across all micro feeds ($0.01-$0.05) for 24 hours.",
                 "price_usdc": settings.PRICE_VIP_24H_USDC,
                 "max_calls": settings.VIP_PASS_MAX_CALLS,
+                "eligible_tiers": ["micro", "dynamic_scout"],
             },
         },
         "discovery": {
             "llms_txt": "/llms.txt",
             "openapi_url": "/openapi.json",
             "well_known_agent": "/.well-known/agent.json",
+            "trending_index": "/api/v1/trending",
         },
     }
 
 
 @router.api_route("/.well-known/agent.json", methods=["GET", "HEAD"], response_class=JSONResponse)
-async def well_known_agent_card(request: Request) -> dict:
+async def well_known_agent_card(request: Request) -> Response:
     """A2A-compatible Agent Card for autonomous multi-agent ecosystems."""
-    return await agents_json_manifest(request)
+    if request.method == "HEAD":
+        return Response(status_code=200, media_type="application/json")
+    return JSONResponse({
+        "$schema": "https://a2a-standard.org/schemas/agent-card.json",
+        "name": "AIM Network M2M Hub",
+        "description": "Autonomous quantitative market data, Base L2 DEX whale radar, and orderflow analytics payable via HTTP 402 (x402) on Base.",
+        "version": settings.VERSION,
+        "url": "https://johngarp.click",
+        "auth": {
+            "type": "x402",
+            "version": "1.0",
+            "network": "base-mainnet",
+            "chain_id": 8453,
+            "token": "USDC",
+            "token_contract": settings.USDC_CONTRACT_ADDRESS,
+            "recipient_wallet": settings.WALLET_ADDRESS,
+            "header_name": "X-PAYMENT-PROOF",
+        },
+        "provider": {
+            "organization": "AIM Network",
+            "url": "https://johngarp.click",
+        },
+        "capabilities": {
+            "mcp": {
+                "supported": True,
+                "endpoint": "https://johngarp.click/mcp",
+                "protocol_version": "2025-03-26",
+            },
+            "payment": {
+                "protocol": "x402",
+                "network": "base",
+                "chain_id": 8453,
+                "currency": "USDC",
+                "token_contract": settings.USDC_CONTRACT_ADDRESS,
+                "recipient_wallet": settings.WALLET_ADDRESS,
+                "facilitator": settings.X402_FACILITATOR_URL or "https://facilitator.payai.network",
+            },
+        },
+        "skills": [
+            {
+                "id": "free-teaser",
+                "name": "Live Market Teaser",
+                "description": "Free zero-auth latency and BTC spot verification feed.",
+                "url": "https://johngarp.click/api/v1/free-teaser",
+                "cost_usdc": 0.0,
+            },
+            {
+                "id": "crypto-pulse",
+                "name": "Crypto Market Pulse",
+                "description": "Real-time BTC/ETH/SOL market pulse, sentiment, and volatility metrics.",
+                "url": "https://johngarp.click/api/v1/crypto-pulse",
+                "cost_usdc": 0.01,
+            },
+            {
+                "id": "base-dex-radar",
+                "name": "Base L2 DEX Whale Radar",
+                "description": "Base L2 DEX liquidity pools, volume spikes, and whale orderflow tracking.",
+                "url": "https://johngarp.click/api/v1/base-dex-radar",
+                "cost_usdc": 0.05,
+            },
+            {
+                "id": "deep-market-report",
+                "name": "Deep Market Quantitative Analysis",
+                "description": "Quantitative regime detection, momentum scoring, and actionable signals.",
+                "url": "https://johngarp.click/api/v1/deep-market-report",
+                "cost_usdc": 1.00,
+            },
+            {
+                "id": "trending",
+                "name": "Trending Tokens Index",
+                "description": "Free public index of active momentum tokens on Base L2.",
+                "url": "https://johngarp.click/api/v1/trending",
+                "cost_usdc": 0.0,
+            },
+        ],
+    })
 
 
 GLAMA_CLAIM_TOKEN = "glama_claim_kMQwR0tBTjmF1CxnpiYj2Cgs6m2DT753"
@@ -336,6 +425,15 @@ def _build_mcp_tools() -> list[dict[str, Any]]:
             "name": "get_deep_market_report",
             "description": f"Institutional M2M quantitative market regime, Base L2 liquidity metrics, and actionable trading signals (${settings.PRICE_PREMIUM_USDC:.2f} USDC via x402 on Base). Endpoint: https://johngarp.click/api/v1/deep-market-report",
             "inputSchema": proof_schema,
+        },
+        {
+            "name": "list_trending_assets",
+            "description": "Free tool ($0.00 USDC): Discover all currently active momentum and trending tokens tracked by the Autonomous Scout agent on Base L2.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": False,
+            },
         },
     ]
 
@@ -441,6 +539,30 @@ async def mcp_server_endpoint(request: Request) -> Response:
                         }
                     )
 
+                if tool_name == "list_trending_assets":
+                    db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
+                    stats = get_stats(db_override)
+                    dynamic_eps = stats.get("dynamic_endpoints", [])
+                    return JSONResponse(
+                        {
+                            "jsonrpc": "2.0",
+                            "id": rpc_id,
+                            "result": {
+                                "content": [
+                                    {
+                                        "type": "text",
+                                        "text": json.dumps({
+                                            "status": "ok",
+                                            "count": len(dynamic_eps),
+                                            "trending_assets": dynamic_eps,
+                                        }),
+                                    }
+                                ],
+                                "isError": False,
+                            },
+                        }
+                    )
+
                 # Paid tools return x402 payment instructions via MCP tool content
                 endpoint_map = {
                     "get_crypto_pulse": ("/api/v1/crypto-pulse", settings.PRICE_MICRO_USDC),
@@ -477,7 +599,7 @@ async def mcp_server_endpoint(request: Request) -> Response:
                                         "text": json.dumps(quote_info),
                                     }
                                 ],
-                                "isError": False,
+                                "isError": True,
                             },
                         }
                     )

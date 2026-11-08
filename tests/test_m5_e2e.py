@@ -164,8 +164,10 @@ def test_full_end_to_end_system(tmp_path: Path):
         assert r_vip_1.status_code == 200
         assert "top_base_pools" in r_vip_1.json()
 
-        r_vip_2 = client.get("/api/v1/deep-market-report", headers=vip_headers)
-        assert r_vip_2.status_code == 200
+        # Micro VIP pass ($2.00) is valid on micro endpoints ($0.01-$0.05)
+        # and correctly rejected on $1.00 deep-market-report for negative margin protection
+        r_vip_deep = client.get("/api/v1/deep-market-report", headers=vip_headers)
+        assert r_vip_deep.status_code == 402
 
         r_vip_3 = client.get("/api/v1/crypto-pulse", headers=vip_headers)
         assert r_vip_3.status_code == 200

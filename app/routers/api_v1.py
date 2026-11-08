@@ -3,6 +3,7 @@ M2M Paid API Endpoints (Tier 1: $0.01 USDC & Tier 2: $1.00 USDC).
 Protected by x402 Payment Protocol on Base L2.
 """
 
+from datetime import datetime, timezone
 from decimal import Decimal
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
@@ -37,18 +38,23 @@ async def get_free_teaser(request: Request):
     Allows autonomous buying bots to verify <150ms latency and live data freshness before paying via x402.
     """
     pulse = await fetch_crypto_pulse_data()
+    feed_status = pulse.get("meta", {}).get("status", "LIVE_FEED_VERIFIED")
+    btc_price = pulse["assets"]["BTC"]["price_usd"]
+
     teaser_data = {
-        "status": "LIVE_FEED_VERIFIED",
+        "status": feed_status,
         "price_usdc": 0.0,
         "timestamp": pulse["timestamp"],
-        "btc_spot_preview_usd": pulse["assets"]["BTC"]["price_usd"],
+        "btc_spot_preview_usd": btc_price,
         "market_sentiment_preview": pulse["market_sentiment"],
         "sample_preview_param": "Add ?sample=true to any paid endpoint to inspect payload schema without x402 payment",
         "schema_sample": {
+            "is_schema_example": True,
+            "notice": "Structure reference only; live values delivered via paid feeds.",
             "crypto_pulse": {
-                "assets": {"BTC": {"price_usd": 89450.0, "change_24h_pct": 1.2, "volume_24h_usd": 45000000000}},
-                "volatility_index": {"level": "MODERATE", "score": 42.5},
-                "market_sentiment": "bullish",
+                "assets": {"BTC": {"price_usd": btc_price, "change_24h_pct": pulse["assets"]["BTC"]["change_24h_pct"], "volume_24h_usd": pulse["assets"]["BTC"]["volume_24h_usd"]}},
+                "volatility_index": {"level": "MODERATE", "score": pulse["volatility_index_24h"]},
+                "market_sentiment": pulse["market_sentiment"],
             },
             "base_dex_radar": {
                 "top_pairs": [{"pair": "WETH/USDC", "dex": "aerodrome", "volume_24h_usd": 12000000, "whale_net_inflow_usd": 450000}],
@@ -59,14 +65,61 @@ async def get_free_teaser(request: Request):
             "ETH & SOL 24h volume & volatility matrix (/api/v1/crypto-pulse -> 0.01 USDC)",
             "Base L2 DEX Whale Liquidity & Top Pools (/api/v1/base-dex-radar -> 0.05 USDC)",
             "Institutional M2M Quantitative Signals (/api/v1/deep-market-report -> 1.00 USDC)",
-            "24h All-Access VIP Pass (1,000 calls across all endpoints -> 2.00 USDC)",
+            "24h Micro VIP Pass (1,000 calls across micro feeds -> 2.00 USDC)",
+            "24h Pro VIP Pass (500 calls across all feeds including Deep Reports -> 10.00 USDC)",
         ],
+        "meta": pulse.get("meta", {}),
         "payment_recipient_base_usdc": settings.WALLET_ADDRESS,
         "x402_network": "base-mainnet (Chain ID 8453)",
     }
     if request.method == "HEAD":
         return Response(status_code=200, media_type="application/json")
     return teaser_data
+
+
+@router.api_route(
+    "/trending",
+    methods=["GET", "HEAD"],
+    openapi_extra={
+        "x-payment-protocol": "free",
+        "x-price-usdc": 0.0,
+    },
+)
+async def list_trending_tokens(request: Request):
+    """
+    Free Public Discovery Index ($0.00 USDC):
+    Lists all currently active momentum and trending tokens tracked by the Autonomous Scout agent.
+    """
+    if request.method == "HEAD":
+        return Response(status_code=200, media_type="application/json")
+
+    db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
+    stats = get_stats(db_override)
+    dynamic_eps = stats.get("dynamic_endpoints", [])
+
+    tokens = []
+    for ep in dynamic_eps:
+        tokens.append({
+            "slug": ep["slug"],
+            "asset_name": ep["asset_name"],
+            "asset_symbol": ep["asset_symbol"],
+            "endpoint_path": ep["endpoint_path"],
+            "price_usdc": ep["price_usdc"],
+            "sample_url": f"{ep['endpoint_path']}?sample=true",
+            "description": f"Live orderflow & sentiment for {ep['asset_name']} ({ep['asset_symbol']})",
+        })
+
+    return JSONResponse({
+        "status": "ok",
+        "count": len(tokens),
+        "network": "base-mainnet",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "trending_assets": tokens,
+        "meta": {
+            "source": "autonomous_scout_base_l2",
+            "disclaimer": "Informational quantitative market data only. Not financial, trading, or investment advice.",
+        },
+    })
 
 
 @router.api_route(

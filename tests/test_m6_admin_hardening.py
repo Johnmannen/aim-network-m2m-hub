@@ -92,7 +92,7 @@ def test_public_landing_and_content_negotiation(tmp_path):
     assert r_html.status_code == 200
     assert "AIM Network" in r_html.text
     assert "Autonomous Machine-to-Machine" in r_html.text
-    assert "/admin" in r_html.text
+    assert "/api/v1/crypto-pulse" in r_html.text
 
     # Content negotiation: Accept: application/json returns discovery manifest
     r_json = c.get("/", headers={"Accept": "application/json"})

@@ -8,13 +8,17 @@ plus deterministic fallback if external APIs are rate-limited or offline.
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import httpx
 
 logger = logging.getLogger(__name__)
 CACHE_TTL_SECONDS = 60.0
 
 _cache_store: Dict[str, Dict[str, Any]] = {}
+
+MARKET_DISCLAIMER = (
+    "Informational quantitative market data only. Not financial, trading, or investment advice."
+)
 
 
 def _get_cached(key: str) -> Any:
@@ -28,26 +32,66 @@ def _set_cached(key: str, data: Any) -> None:
     _cache_store[key] = {"ts": time.monotonic(), "data": data}
 
 
-async def fetch_crypto_pulse_data() -> Dict[str, Any]:
+async def _fetch_live_crypto_prices() -> Tuple[Dict[str, Any], List[str], str]:
     """
-    Fetch real-time market pulse data for Tier 1 (/api/v1/crypto-pulse, 0.01 USDC).
-    Combines BTC, ETH, SOL, BASE ecosystem metrics and Fear & Greed sentiment.
+    Robust multi-provider spot price fetcher:
+    1. Primary: Binance Multi-Ticker 24hr API (live price, 24h change, 24h volume)
+    2. Secondary: Coinbase Spot Price API (native Base ecosystem feed)
+    3. Tertiary: CoinGecko Simple Price API
+    Returns: (prices_dict, sources_used, feed_status)
     """
-    cached = _get_cached("crypto_pulse")
-    if cached:
-        return {**cached, "cache_hit": True}
+    sources_used: List[str] = []
+    feed_status = "DEGRADED"
 
+    # Default realistic baseline if all upstreams fail
     prices = {
-        "bitcoin": {"usd": 89450.0, "usd_24h_change": 3.42, "usd_24h_vol": 42100000000.0},
-        "ethereum": {"usd": 3120.5, "usd_24h_change": 2.15, "usd_24h_vol": 19500000000.0},
-        "solana": {"usd": 214.8, "usd_24h_change": 5.68, "usd_24h_vol": 6800000000.0},
+        "bitcoin": {"usd": 75850.0, "usd_24h_change": 0.5, "usd_24h_vol": 38000000000.0},
+        "ethereum": {"usd": 2240.0, "usd_24h_change": 0.2, "usd_24h_vol": 14000000000.0},
+        "solana": {"usd": 89.5, "usd_24h_change": -0.4, "usd_24h_vol": 520000000.0},
     }
-    fng_value = 72
-    fng_classification = "Greed"
-    live_source = "fallback_resilient_feed"
 
+    # 1. Try Binance (Fastest single request for BTC, ETH, SOL)
     try:
-        async with httpx.AsyncClient(timeout=3.5) as client:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get(
+                'https://api.binance.com/api/v3/ticker/24hr?symbols=["BTCUSDT","ETHUSDT","SOLUSDT"]'
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                mapping = {"BTCUSDT": "bitcoin", "ETHUSDT": "ethereum", "SOLUSDT": "solana"}
+                for item in data:
+                    sym = item.get("symbol")
+                    if sym in mapping:
+                        target = mapping[sym]
+                        prices[target] = {
+                            "usd": float(item.get("lastPrice", 0.0) or 0.0),
+                            "usd_24h_change": float(item.get("priceChangePercent", 0.0) or 0.0),
+                            "usd_24h_vol": float(item.get("quoteVolume", 0.0) or 0.0),
+                        }
+                if prices["bitcoin"]["usd"] > 1000.0:
+                    sources_used.append("binance_spot_24h")
+                    feed_status = "LIVE_FEED_VERIFIED"
+                    return prices, sources_used, feed_status
+    except Exception as exc:
+        logger.warning("Binance spot ticker failed: %s", exc)
+
+    # 2. Try Coinbase Spot (Native Base L2 provider)
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            cb_resp = await client.get("https://api.coinbase.com/v2/prices/BTC-USD/spot")
+            if cb_resp.status_code == 200:
+                cb_data = cb_resp.json().get("data", {})
+                btc_price = float(cb_data.get("amount", 0.0) or 0.0)
+                if btc_price > 1000.0:
+                    prices["bitcoin"]["usd"] = btc_price
+                    sources_used.append("coinbase_spot")
+                    feed_status = "LIVE_FEED_VERIFIED"
+    except Exception as exc:
+        logger.warning("Coinbase spot API failed: %s", exc)
+
+    # 3. Try CoinGecko Fallback
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
             cg_resp = await client.get(
                 "https://api.coingecko.com/api/v3/simple/price",
                 params={
@@ -60,28 +104,58 @@ async def fetch_crypto_pulse_data() -> Dict[str, Any]:
             if cg_resp.status_code == 200:
                 cg_json = cg_resp.json()
                 if "bitcoin" in cg_json:
-                    prices = cg_json
-                    live_source = "coingecko_live"
+                    for k in ["bitcoin", "ethereum", "solana"]:
+                        if k in cg_json:
+                            prices[k] = cg_json[k]
+                    sources_used.append("coingecko_spot")
+                    feed_status = "LIVE_FEED_VERIFIED"
+    except Exception as exc:
+        logger.warning("CoinGecko API failed: %s", exc)
 
+    if not sources_used:
+        sources_used.append("resilient_baseline")
+
+    return prices, sources_used, feed_status
+
+
+async def fetch_crypto_pulse_data() -> Dict[str, Any]:
+    """
+    Fetch real-time market pulse data for Tier 1 (/api/v1/crypto-pulse, 0.01 USDC).
+    Combines BTC, ETH, SOL, BASE ecosystem metrics and Fear & Greed sentiment.
+    """
+    cached = _get_cached("crypto_pulse")
+    if cached:
+        return {**cached, "cache_hit": True}
+
+    start_perf = time.perf_counter()
+    prices, sources, feed_status = await _fetch_live_crypto_prices()
+
+    fng_value = 72
+    fng_classification = "Greed"
+    try:
+        async with httpx.AsyncClient(timeout=2.5) as client:
             fng_resp = await client.get("https://api.alternative.me/fng/?limit=1")
             if fng_resp.status_code == 200:
                 fng_data = fng_resp.json().get("data", [])
                 if fng_data:
                     fng_value = int(fng_data[0].get("value", 72))
                     fng_classification = fng_data[0].get("value_classification", "Greed")
+                    sources.append("alternative_me_fng")
     except Exception as exc:
-        logger.warning("Upstream market data fetch fallback triggered: %s", exc)
+        logger.warning("Fear & Greed index fetch fallback triggered: %s", exc)
 
     btc_change = float(prices.get("bitcoin", {}).get("usd_24h_change", 0.0) or 0.0)
     eth_change = float(prices.get("ethereum", {}).get("usd_24h_change", 0.0) or 0.0)
     sol_change = float(prices.get("solana", {}).get("usd_24h_change", 0.0) or 0.0)
     avg_abs_move = round((abs(btc_change) + abs(eth_change) + abs(sol_change)) / 3.0, 2)
     sentiment = "bullish" if (btc_change + eth_change) >= 0 else "bearish"
+    now_iso = datetime.now(timezone.utc).isoformat()
+    latency_ms = round((time.perf_counter() - start_perf) * 1000, 1)
 
     payload = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": now_iso,
         "tier": "micro_0.01_usdc",
-        "source_status": live_source,
+        "source_status": feed_status,
         "market_sentiment": sentiment,
         "fear_and_greed": {
             "index": fng_value,
@@ -90,21 +164,21 @@ async def fetch_crypto_pulse_data() -> Dict[str, Any]:
         "volatility_index_24h": avg_abs_move,
         "assets": {
             "BTC": {
-                "price_usd": prices.get("bitcoin", {}).get("usd", 89450.0),
+                "price_usd": round(float(prices.get("bitcoin", {}).get("usd", 75850.0)), 2),
                 "change_24h_pct": round(btc_change, 2),
                 "volume_24h_usd": round(
                     float(prices.get("bitcoin", {}).get("usd_24h_vol", 0.0) or 0.0), 2
                 ),
             },
             "ETH": {
-                "price_usd": prices.get("ethereum", {}).get("usd", 3120.5),
+                "price_usd": round(float(prices.get("ethereum", {}).get("usd", 2240.0)), 2),
                 "change_24h_pct": round(eth_change, 2),
                 "volume_24h_usd": round(
                     float(prices.get("ethereum", {}).get("usd_24h_vol", 0.0) or 0.0), 2
                 ),
             },
             "SOL": {
-                "price_usd": prices.get("solana", {}).get("usd", 214.8),
+                "price_usd": round(float(prices.get("solana", {}).get("usd", 89.5)), 2),
                 "change_24h_pct": round(sol_change, 2),
                 "volume_24h_usd": round(
                     float(prices.get("solana", {}).get("usd_24h_vol", 0.0) or 0.0), 2
@@ -116,6 +190,13 @@ async def fetch_crypto_pulse_data() -> Dict[str, Any]:
             "x402-M2M-Payments",
             "Base-L2-DeFi",
         ],
+        "meta": {
+            "sources": sources,
+            "as_of": now_iso,
+            "latency_ms": latency_ms,
+            "status": feed_status,
+            "disclaimer": MARKET_DISCLAIMER,
+        },
         "cache_hit": False,
     }
     _set_cached("crypto_pulse", payload)
@@ -195,6 +276,12 @@ async def fetch_deep_market_report() -> Dict[str, Any]:
             "stop_loss_atr_multiplier": 1.8,
         },
         "underlying_pulse": pulse,
+        "meta": {
+            "sources": pulse.get("meta", {}).get("sources", ["binance", "coinbase", "alternative_me"]),
+            "as_of": pulse.get("meta", {}).get("as_of", datetime.now(timezone.utc).isoformat()),
+            "status": pulse.get("meta", {}).get("status", "LIVE_FEED_VERIFIED"),
+            "disclaimer": MARKET_DISCLAIMER,
+        },
         "cache_hit": False,
     }
     _set_cached("deep_market_report", report)
@@ -252,6 +339,12 @@ async def fetch_dynamic_asset_pulse(
             "change_24h_pct": change_24h,
             "volume_24h_usd": vol_24h,
             "momentum_signal": "STRONG_INFLOW" if change_24h >= 2.0 else "NEUTRAL_FLOW",
+        },
+        "meta": {
+            "sources": [source_status],
+            "as_of": datetime.now(timezone.utc).isoformat(),
+            "status": "LIVE_FEED_VERIFIED" if "live" in source_status else "DEGRADED",
+            "disclaimer": MARKET_DISCLAIMER,
         },
         "cache_hit": False,
     }
@@ -349,6 +442,12 @@ async def fetch_base_dex_radar() -> Dict[str, Any]:
         "source_status": source_status,
         "top_base_pools": pools,
         "summary": f"Tracking {len(pools)} high-velocity Base L2 liquidity pools in real time.",
+        "meta": {
+            "sources": [source_status],
+            "as_of": datetime.now(timezone.utc).isoformat(),
+            "status": "LIVE_FEED_VERIFIED" if "live" in source_status else "DEGRADED",
+            "disclaimer": MARKET_DISCLAIMER,
+        },
         "cache_hit": False,
     }
     _set_cached("base_dex_radar", payload)
