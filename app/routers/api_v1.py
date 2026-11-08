@@ -127,10 +127,12 @@ async def list_trending_tokens(request: Request):
     seen_slugs = set()
     for item in canonical_seed:
         is_synth = bool(item.get("is_synthetic", False))
+        item_as_of = item.get("data_as_of") if "data_as_of" in item else data_as_of
+        item_age = item.get("data_age_seconds") if "data_age_seconds" in item else data_age_seconds
         tokens.append({
             **item,
-            "data_as_of": None if is_synth else data_as_of,
-            "data_age_seconds": None if is_synth else data_age_seconds,
+            "data_as_of": None if is_synth else item_as_of,
+            "data_age_seconds": None if is_synth else item_age,
         })
         seen_slugs.add(item["slug"])
 
@@ -150,12 +152,12 @@ async def list_trending_tokens(request: Request):
                 "price_usdc": ep["price_usdc"],
                 "sample_url": f"{ep['endpoint_path']}?sample=true",
                 "description": desc,
-                "liquidity_usd": ep.get("liquidity_usd", 124850.20),
-                "volume_24h_usd": ep.get("volume_24h_usd", 48900.50),
-                "momentum_24h_pct": ep.get("momentum_24h_pct", 2.45),
-                "pool_age_days": ep.get("pool_age_days", 42),
-                "liquidity_class": "MODERATE_LIQUIDITY",
-                "dex": "Aerodrome / Base",
+                "liquidity_usd": None,
+                "volume_24h_usd": None,
+                "momentum_24h_pct": None,
+                "pool_age_days": None,
+                "liquidity_class": None,
+                "dex": None,
                 "source": "autonomous_scout_seed",
                 "is_synthetic": True,
                 "data_as_of": None,
@@ -272,12 +274,17 @@ async def get_base_dex_radar(request: Request):
                     "liquidity_usd": 0.0,
                     "price_change_h24_pct": 0.0,
                     "whale_flow_signal": "SAMPLE_SIGNAL",
+                    "is_stale": False,
+                    "is_synthetic": False,
                 }
             ],
             "summary": "Tracking Base L2 liquidity pools (Schema Template).",
             "meta": {
                 "sources": ["schema_template"],
                 "as_of": "2026-01-01T00:00:00Z",
+                "data_age_seconds": 0,
+                "is_stale": False,
+                "fallback_reason": None,
                 "status": "SCHEMA_TEMPLATE_ONLY",
                 "disclaimer": "Structure template only. Live real-time data unlocked via 0.05 USDC x402 payment.",
             },
@@ -549,10 +556,15 @@ async def get_dynamic_trending_endpoint(slug: str, request: Request):
                 "change_24h_pct": 0.0,
                 "volume_24h_usd": 0.0,
                 "momentum_signal": "SAMPLE_FLOW",
+                "is_stale": False,
+                "is_synthetic": False,
             },
             "meta": {
                 "sources": ["schema_template"],
                 "as_of": "2026-01-01T00:00:00Z",
+                "data_age_seconds": 0,
+                "is_stale": False,
+                "fallback_reason": None,
                 "status": "SCHEMA_TEMPLATE_ONLY",
                 "disclaimer": f"Structure template only. Live {matched['asset_symbol']} orderflow unlocked via {float(price_dec):.2f} USDC x402 payment.",
             },
@@ -569,13 +581,17 @@ async def get_dynamic_trending_endpoint(slug: str, request: Request):
 
     dynamic_pulse = None
     if canonical_match:
-        feed_age = trending_feed.get("data_age_seconds")
+        token_age = (
+            canonical_match.get("data_age_seconds")
+            if canonical_match.get("data_age_seconds") is not None
+            else trending_feed.get("data_age_seconds")
+        )
         if (
             trending_feed.get("source") == "static_seed"
             or canonical_match.get("is_synthetic")
-            or (canonical_match.get("is_stale") and feed_age is not None and feed_age > PAID_MAX_STALE_AGE_SECONDS)
+            or (canonical_match.get("is_stale") and token_age is not None and token_age > PAID_MAX_STALE_AGE_SECONDS)
         ):
-            # Y2/Z2/Z3: never sell hardcoded seed values or expired stale data. Report outage and charge nothing.
+            # Y2/Z2/Z3/AA2: never sell hardcoded seed values or expired stale data. Report outage and charge nothing.
             return JSONResponse(
                 status_code=503,
                 content={
@@ -641,6 +657,12 @@ async def get_dynamic_trending_endpoint(slug: str, request: Request):
 
     increment_dynamic_endpoint_stats(clean_slug, float(price_dec), db_override)
     if canonical_match:
+        token_as_of = canonical_match.get("data_as_of") or trending_feed.get("data_as_of")
+        token_age = (
+            canonical_match.get("data_age_seconds")
+            if canonical_match.get("data_age_seconds") is not None
+            else trending_feed.get("data_age_seconds")
+        )
         return {
             "status": "ok",
             "tier": "dynamic_trending_0.05_usdc",
@@ -660,9 +682,9 @@ async def get_dynamic_trending_endpoint(slug: str, request: Request):
             },
             "meta": {
                 "source": trending_feed.get("source", "dexscreener_base_live"),
-                "as_of": trending_feed.get("data_as_of"),
-                "data_age_seconds": trending_feed.get("data_age_seconds"),
-                "is_stale": bool(trending_feed.get("is_stale", False)),
+                "as_of": token_as_of,
+                "data_age_seconds": token_age,
+                "is_stale": bool(canonical_match.get("is_stale", False)),
                 "fallback_reason": trending_feed.get("fallback_reason"),
                 "disclaimer": "Informational quantitative market data only. Not financial, trading, or investment advice.",
             },

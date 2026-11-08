@@ -342,8 +342,10 @@ async def run_agent_self_diagnosis(
     pulse = await fetch_crypto_pulse_data()
     all_dyn = stats.get("dynamic_endpoints", [])
     canonical_slugs = {"morpho", "virtual"}
+    canonical_count = sum(1 for ep in all_dyn if ep.get("slug") in canonical_slugs)
     scout_built_count = sum(1 for ep in all_dyn if ep.get("slug") not in canonical_slugs)
-    total_services = 3 + len(all_dyn)
+    core_endpoints_count = 3
+    total_services = core_endpoints_count + canonical_count + scout_built_count
 
     return {
         "overall_status": "ALL_AGENTS_OPERATIONAL",
@@ -351,7 +353,7 @@ async def run_agent_self_diagnosis(
             {
                 "name": "1. Spanar- & Bygg-Agent (Scout & Auto-Deployer)",
                 "status": "ONLINE",
-                "detail": f"Har byggt {scout_built_count} st extra trend-API:er automatiskt (+ {len(all_dyn) - scout_built_count} kanoniska). Söker nya var 60:e min.",
+                "detail": f"Har byggt {scout_built_count} st extra trend-API:er automatiskt (+ {canonical_count} kanoniska). Söker nya var 60:e min.",
             },
             {
                 "name": "2. Data- & Analys-Agent (Market Intelligence Engine)",
@@ -523,6 +525,10 @@ def _render_dashboard_html(request: Request) -> HTMLResponse:
             }
         )
 
+    all_dyn_render = stats.get("dynamic_endpoints", [])
+    canonical_slugs = {"morpho", "virtual"}
+    canonical_render = sum(1 for ep in all_dyn_render if ep.get("slug") in canonical_slugs)
+    scout_built_render = sum(1 for ep in all_dyn_render if ep.get("slug") not in canonical_slugs)
     template = _jinja_env.get_template("dashboard.html")
     html_content = template.render(
         status_badge_color=status_badge_color,
@@ -542,7 +548,9 @@ def _render_dashboard_html(request: Request) -> HTMLResponse:
         stats=stats,
         telemetry=telemetry,
         stream_events=stream_events,
-        total_active_apis=3 + len(stats.get("dynamic_endpoints", [])),
+        scout_built_count=scout_built_render,
+        canonical_count=canonical_render,
+        total_active_apis=3 + canonical_render + scout_built_render,
     )
     return HTMLResponse(content=html_content)
 

@@ -678,8 +678,19 @@ async def fetch_trending_dex_tokens() -> Dict[str, Any]:
             age_seconds = (
                 max(0, int(now_ts - fetched_at_ts)) if fetched_at_ts else None
             )
+        refreshed_tokens = []
+        for t in cached["tokens"]:
+            tok = dict(t)
+            t_obs = tok.pop("_observed_ts", None)
+            if tok.get("is_synthetic") or (is_stale and not t_obs and not observed_ts):
+                tok["data_age_seconds"] = None
+            elif t_obs:
+                tok["data_age_seconds"] = max(0, int(now_ts - t_obs))
+            elif age_seconds is not None:
+                tok["data_age_seconds"] = age_seconds
+            refreshed_tokens.append(tok)
         return {
-            "tokens": cached["tokens"],
+            "tokens": refreshed_tokens,
             "data_as_of": cached.get("data_as_of"),
             "data_age_seconds": age_seconds,
             "source": cached.get("source", "dexscreener_base_live"),
@@ -775,8 +786,15 @@ async def fetch_trending_dex_tokens() -> Dict[str, Any]:
             observed_ts = last_good.get("_fetched_ts") or now_ts
             age_seconds = max(0, int(now_ts - observed_ts))
             if age_seconds <= TRENDING_LAST_GOOD_MAX_AGE_SECONDS:
+                stale_tokens = []
+                for t in last_good["tokens"]:
+                    tok = dict(t, is_stale=True)
+                    t_obs = tok.get("_observed_ts") or observed_ts
+                    tok["data_as_of"] = tok.get("data_as_of") or last_good.get("data_as_of")
+                    tok["data_age_seconds"] = max(0, int(now_ts - t_obs))
+                    stale_tokens.append(tok)
                 last_good_payload = {
-                    "tokens": [dict(t, is_stale=True) for t in last_good["tokens"]],
+                    "tokens": stale_tokens,
                     "data_as_of": last_good.get("data_as_of"),
                     "data_age_seconds": age_seconds,
                     "_fetched_ts": now_ts,
@@ -786,7 +804,13 @@ async def fetch_trending_dex_tokens() -> Dict[str, Any]:
                     "fallback_reason": fallback_reason,
                 }
                 _set_cached(cache_key, last_good_payload)
-                return last_good_payload
+                return {
+                    **last_good_payload,
+                    "tokens": [
+                        {k: v for k, v in tok.items() if k != "_observed_ts"}
+                        for tok in stale_tokens
+                    ],
+                }
         source_label = "static_seed"
         for item in tokens_config:
             fb = item["fallback"]
@@ -808,6 +832,8 @@ async def fetch_trending_dex_tokens() -> Dict[str, Any]:
                 "liquidity_class": liq_class,
                 "dex": fb["dex"],
                 "is_stale": True,
+                "data_as_of": None,
+                "data_age_seconds": None,
             })
         fallback_payload = {
             "tokens": fetched_tokens,
@@ -821,9 +847,11 @@ async def fetch_trending_dex_tokens() -> Dict[str, Any]:
         _set_cached(cache_key, fallback_payload)
         return fallback_payload
 
+    fetched_iso = now_dt.isoformat()
+    last_good_payload = _last_good_live.get("payload") or {}
     prior_good_tokens = {
         t["slug"]: t
-        for t in (_last_good_live.get("payload") or {}).get("tokens", [])
+        for t in last_good_payload.get("tokens", [])
         if not t.get("is_synthetic")
     }
     newly_observed_tokens = []
@@ -853,6 +881,9 @@ async def fetch_trending_dex_tokens() -> Dict[str, Any]:
                 age_days = None
             token_is_stale = False
             token_is_synthetic = False
+            token_obs_ts = now_ts
+            token_as_of = fetched_iso
+            token_age = 0
         elif item["slug"] in prior_good_tokens:
             prev = prior_good_tokens[item["slug"]]
             liq = prev["liquidity_usd"]
@@ -862,20 +893,29 @@ async def fetch_trending_dex_tokens() -> Dict[str, Any]:
             dex_name = prev.get("dex", "Aerodrome / Base")
             token_is_stale = True
             token_is_synthetic = False
+            token_obs_ts = prev.get("_observed_ts") or last_good_payload.get("_fetched_ts") or now_ts
+            token_as_of = prev.get("data_as_of") or last_good_payload.get("data_as_of") or fetched_iso
+            token_age = max(0, int(now_ts - token_obs_ts))
         else:
-            liq = item["fallback"]["liquidity_usd"]
-            vol = item["fallback"]["volume_24h_usd"]
-            mom = item["fallback"]["momentum_24h_pct"]
+            liq = None
+            vol = None
+            mom = None
             age_days = None
-            dex_name = "Aerodrome / Base"
+            dex_name = None
             token_is_stale = True
             token_is_synthetic = True
+            token_obs_ts = None
+            token_as_of = None
+            token_age = None
 
-        liq_class = (
-            "DEEP_LIQUIDITY"
-            if (liq >= 500000.0 and vol >= 100000.0)
-            else ("MODERATE_LIQUIDITY" if liq >= 100000.0 else "LOW_LIQUIDITY")
-        )
+        if liq is None or vol is None:
+            liq_class = None
+        else:
+            liq_class = (
+                "DEEP_LIQUIDITY"
+                if (liq >= 500000.0 and vol >= 100000.0)
+                else ("MODERATE_LIQUIDITY" if liq >= 100000.0 else "LOW_LIQUIDITY")
+            )
 
         token_entry = {
             "slug": item["slug"],
@@ -892,6 +932,9 @@ async def fetch_trending_dex_tokens() -> Dict[str, Any]:
             "liquidity_class": liq_class,
             "dex": dex_name,
             "is_stale": token_is_stale,
+            "data_as_of": token_as_of,
+            "data_age_seconds": token_age,
+            "_observed_ts": token_obs_ts,
         }
         if token_is_synthetic:
             token_entry["is_synthetic"] = True
@@ -899,29 +942,49 @@ async def fetch_trending_dex_tokens() -> Dict[str, Any]:
         if chosen_pair or item["slug"] in prior_good_tokens:
             newly_observed_tokens.append(token_entry)
 
-    fetched_iso = now_dt.isoformat()
+    # AA2: preserve each token's true observation time; feed-level _fetched_ts/as_of tracks the oldest real token
     if len(newly_observed_tokens) == len(tokens_config):
+        oldest_entry = min(newly_observed_tokens, key=lambda t: t.get("_observed_ts") or now_ts)
+        oldest_ts = oldest_entry.get("_observed_ts") or now_ts
+        oldest_as_of = oldest_entry.get("data_as_of") or fetched_iso
         _last_good_live["payload"] = {
             "tokens": newly_observed_tokens,
-            "data_as_of": fetched_iso,
-            "_fetched_ts": now_ts,
+            "data_as_of": oldest_as_of,
+            "_fetched_ts": oldest_ts,
         }
+
+    observed_entries = [t for t in fetched_tokens if t.get("_observed_ts") is not None]
+    if observed_entries:
+        oldest_obs = min(observed_entries, key=lambda t: t["_observed_ts"])
+        feed_observed_ts = oldest_obs["_observed_ts"]
+        feed_as_of = oldest_obs["data_as_of"]
+        feed_age_seconds = max(0, int(now_ts - feed_observed_ts))
+    else:
+        feed_observed_ts = now_ts
+        feed_as_of = fetched_iso
+        feed_age_seconds = 0
+
+    any_stale = any(t.get("is_stale") for t in fetched_tokens)
     cache_payload = {
         "tokens": fetched_tokens,
-        "data_as_of": fetched_iso,
-        "_fetched_ts": now_ts,
-        "_observed_ts": now_ts,
+        "data_as_of": feed_as_of,
+        "_fetched_ts": now_ts if not any_stale else feed_observed_ts,
+        "_observed_ts": feed_observed_ts,
         "source": source_label,
-        "is_stale": False,
+        "is_stale": any_stale,
         "fallback_reason": None,
     }
     _set_cached(cache_key, cache_payload)
+    public_tokens = [
+        {k: v for k, v in tok.items() if k != "_observed_ts"}
+        for tok in fetched_tokens
+    ]
     return {
-        "tokens": fetched_tokens,
-        "data_as_of": fetched_iso,
-        "data_age_seconds": 0,
+        "tokens": public_tokens,
+        "data_as_of": feed_as_of,
+        "data_age_seconds": feed_age_seconds,
         "source": source_label,
-        "is_stale": False,
+        "is_stale": any_stale,
         "fallback_reason": None,
     }
 

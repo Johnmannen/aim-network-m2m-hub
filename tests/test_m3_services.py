@@ -561,3 +561,190 @@ def test_z4_canonical_slugs_survive_dynamic_endpoint_pruning(tmp_path):
     assert "morpho" in slugs
     assert "virtual" in slugs
 
+
+def test_aa1_synthetic_scout_entries_have_null_metrics_in_free_list(tmp_path):
+    """AA1: synthetic scout seeds in /api/v1/trending must not expose fabricated liquidity/volume/momentum numbers."""
+    from app.database import register_dynamic_endpoint
+    from app.main import create_app
+    from fastapi.testclient import TestClient
+
+    db_file = str(tmp_path / "test_aa1.db")
+    register_dynamic_endpoint(
+        slug="wasted",
+        asset_name="WASTED",
+        asset_symbol="WASTED",
+        coingecko_id="wasted-2",
+        price_usdc=0.05,
+        db_path=db_file,
+    )
+    client = TestClient(create_app(db_path=db_file))
+    resp = client.get("/api/v1/trending")
+    assert resp.status_code == 200
+    wasted = next(t for t in resp.json()["trending_assets"] if t["slug"] == "wasted")
+    assert wasted["is_synthetic"] is True
+    assert wasted["source"] == "autonomous_scout_seed"
+    assert wasted["liquidity_usd"] is None
+    assert wasted["volume_24h_usd"] is None
+    assert wasted["momentum_24h_pct"] is None
+    assert wasted["pool_age_days"] is None
+    assert wasted["liquidity_class"] is None
+    assert wasted["dex"] is None
+
+
+def test_aa2_mixed_hit_preserves_older_token_age_and_blocks_expired_paid_call(tmp_path, monkeypatch):
+    """AA2: partial DexScreener hit must preserve prior token's age instead of resetting it to 0."""
+    import asyncio
+    from datetime import datetime, timezone
+    import app.services.market_data as md
+    from app.database import get_stats
+    from app.main import create_app
+    from fastapi.testclient import TestClient
+
+    now_ts = datetime.now(timezone.utc).timestamp()
+    old_ts = now_ts - 7200  # 2 hours ago
+    old_iso = datetime.fromtimestamp(old_ts, tz=timezone.utc).isoformat()
+
+    md._cache_store.pop("trending_dex_tokens", None)
+    md._last_good_live["payload"] = {
+        "tokens": [
+            {
+                "slug": "morpho",
+                "asset_name": "Morpho",
+                "asset_symbol": "MORPHO",
+                "endpoint_path": "/api/v1/trending/morpho",
+                "price_usdc": 0.05,
+                "sample_url": "/api/v1/trending/morpho?sample=true",
+                "description": "Morpho desc",
+                "liquidity_usd": 800000.0,
+                "volume_24h_usd": 200000.0,
+                "momentum_24h_pct": 1.0,
+                "pool_age_days": None,
+                "liquidity_class": "DEEP_LIQUIDITY",
+                "dex": "Aerodrome / Base",
+                "is_stale": False,
+                "is_synthetic": False,
+                "data_as_of": old_iso,
+                "data_age_seconds": 0,
+                "_observed_ts": old_ts,
+            },
+            {
+                "slug": "virtual",
+                "asset_name": "Virtual Protocol",
+                "asset_symbol": "VIRTUAL",
+                "endpoint_path": "/api/v1/trending/virtual",
+                "price_usdc": 0.05,
+                "sample_url": "/api/v1/trending/virtual?sample=true",
+                "description": "Virtual desc",
+                "liquidity_usd": 950000.0,
+                "volume_24h_usd": 500000.0,
+                "momentum_24h_pct": -0.5,
+                "pool_age_days": None,
+                "liquidity_class": "DEEP_LIQUIDITY",
+                "dex": "Aerodrome / Base",
+                "is_stale": False,
+                "is_synthetic": False,
+                "data_as_of": old_iso,
+                "data_age_seconds": 0,
+                "_observed_ts": old_ts,
+            },
+        ],
+        "data_as_of": old_iso,
+        "data_age_seconds": 0,
+        "_fetched_ts": old_ts,
+        "source": "dexscreener_base_live",
+        "is_stale": False,
+        "fallback_reason": None,
+    }
+
+    call_mode = {"step": "partial"}
+
+    class _MixedThen429Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc_info):
+            return False
+
+        async def get(self, url):
+            if call_mode["step"] == "partial":
+                pairs = [
+                    {
+                        "chainId": "base",
+                        "dexId": "aerodrome",
+                        "baseToken": {"address": "0xbaa5cc21fd487b8fcc2f632f3f4e8d37262a0842"},
+                        "liquidity": {"usd": 910000.0},
+                        "volume": {"h24": 260000.0},
+                        "priceChange": {"h24": 2.1},
+                        "pairCreatedAt": None,
+                    }
+                ]
+                return _FakeResponse(200, {"pairs": pairs})
+            return _FakeResponse(429, {})
+
+    async def _fast_sleep(_):
+        return None
+
+    monkeypatch.setattr(md.httpx, "AsyncClient", _MixedThen429Client)
+    monkeypatch.setattr(md.asyncio, "sleep", _fast_sleep)
+
+    # Step 1: Partial hit (morpho fresh, virtual from 2h-old prior_good)
+    res_partial = asyncio.run(md.fetch_trending_dex_tokens())
+    assert res_partial["is_stale"] is True
+    morpho_p = next(t for t in res_partial["tokens"] if t["slug"] == "morpho")
+    virtual_p = next(t for t in res_partial["tokens"] if t["slug"] == "virtual")
+    assert morpho_p["is_stale"] is False
+    assert morpho_p["data_age_seconds"] == 0
+    assert virtual_p["is_stale"] is True
+    assert virtual_p["data_age_seconds"] >= 7200
+
+    # Step 2: Next fetch hits 429 -> feed age must reflect oldest token (>= 7200), not 0
+    md._cache_store.pop("trending_dex_tokens", None)
+    call_mode["step"] = "429"
+    res_429 = asyncio.run(md.fetch_trending_dex_tokens())
+    assert res_429["source"] == "dexscreener_base_live_last_good"
+    assert res_429["data_age_seconds"] >= 7200
+
+    # Step 3: Paid call for 2h-old virtual is rejected with 503 DATA_QUALITY_UNAVAILABLE
+    db_file = str(tmp_path / "test_aa2.db")
+    client = TestClient(create_app(db_path=db_file))
+    r_paid = client.get(
+        "/api/v1/trending/virtual", headers={"X-PAYMENT-PROOF": "test_tx_aa2_virtual_001"}
+    )
+    assert r_paid.status_code == 503
+    assert r_paid.json()["status"] == "DATA_QUALITY_UNAVAILABLE"
+    assert get_stats(db_file)["total_calls"] == 0
+
+    md._cache_store.pop("trending_dex_tokens", None)
+    md._last_good_live.clear()
+
+
+def test_aa3_sample_payload_includes_staleness_and_synthetic_flags(tmp_path):
+    """AA3: ?sample=true schema preview must include is_stale and is_synthetic fields matching paid schema."""
+    from app.database import register_dynamic_endpoint
+    from app.main import create_app
+    from fastapi.testclient import TestClient
+
+    db_file = str(tmp_path / "test_aa3.db")
+    register_dynamic_endpoint(
+        slug="wasted",
+        asset_name="WASTED",
+        asset_symbol="WASTED",
+        coingecko_id="wasted-2",
+        price_usdc=0.05,
+        db_path=db_file,
+    )
+    client = TestClient(create_app(db_path=db_file))
+
+    for path in ("/api/v1/trending/wasted?sample=true", "/api/v1/trending/morpho?sample=true"):
+        resp = client.get(path)
+        assert resp.status_code == 200
+        payload = resp.json()["payload"]
+        assert "is_stale" in payload["asset"]
+        assert "is_synthetic" in payload["asset"]
+        assert "is_stale" in payload["meta"]
+        assert "fallback_reason" in payload["meta"]
+
+
