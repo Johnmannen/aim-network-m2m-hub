@@ -405,15 +405,15 @@ def register_dynamic_endpoint(
                 now,
             ),
         )
-        # Prune oldest unused scout endpoints if exceeding 12 items (never delete active ones or canonical slugs)
+        # Prune oldest unused scout endpoints if exceeding 12 items (never delete active ones or canonical/bootstrapped slugs)
         conn.execute(
             """
             DELETE FROM dynamic_endpoints
             WHERE calls_count = 0
-              AND slug NOT IN ('morpho', 'virtual')
+              AND slug NOT IN ('morpho', 'virtual', 'wasted')
               AND slug NOT IN (
                   SELECT slug FROM dynamic_endpoints
-                  WHERE slug NOT IN ('morpho', 'virtual')
+                  WHERE slug NOT IN ('morpho', 'virtual', 'wasted')
                   ORDER BY created_at DESC LIMIT 12
               );
             """
