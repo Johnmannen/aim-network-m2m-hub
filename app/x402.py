@@ -400,11 +400,17 @@ async def require_x402_payment(
                     verified_mode=verified_label,
                     db_path=db_path,
                 )
-                if tier == "premium" and created.get("amount_usdc", 0.0) < 10.0:
+                if tier == "premium" and created.get("amount_usdc", 0.0) < float(
+                    settings.PRO_PASS_PRICE_DEC
+                ):
                     return _quote(
                         price_usdc,
                         description,
-                        error_message="Micro VIP Pass ($2.00) does not include Premium reports ($1.00). Pro Pass ($10.00) required.",
+                        error_message=(
+                            f"Micro VIP Pass (${float(settings.PRICE_VIP_24H_DEC):.2f}) does not include "
+                            f"Premium reports ($1.00). Pro Pass "
+                            f"(${float(settings.PRO_PASS_PRICE_DEC):.2f}) required."
+                        ),
                     )
                 return None
             except ValueError:
@@ -414,7 +420,7 @@ async def require_x402_payment(
                     error_message="VIP pass expired or call quota exhausted.",
                 )
     else:
-        # Check if caller paid >= $2.00 USDC for a new 24h VIP Pass (Micro >= 2.00, Pro >= 10.00)
+        # Check if caller paid >= $2.00 USDC for a new 24h VIP Pass (Micro, or Pro at the configured price)
         verify_res = await verify_base_usdc_transaction(
             tx_hash=payment_proof,
             expected_amount_usdc=settings.PRICE_VIP_24H_DEC,
@@ -435,11 +441,17 @@ async def require_x402_payment(
                     verified_mode=verified_mode,
                     db_path=db_path,
                 )
-                if tier == "premium" and created.get("amount_usdc", 0.0) < 10.0:
+                if tier == "premium" and created.get("amount_usdc", 0.0) < float(
+                    settings.PRO_PASS_PRICE_DEC
+                ):
                     return _quote(
                         price_usdc,
                         description,
-                        error_message="Micro VIP Pass ($2.00) does not include Premium reports ($1.00). Pro Pass ($10.00) required.",
+                        error_message=(
+                            f"Micro VIP Pass (${float(settings.PRICE_VIP_24H_DEC):.2f}) does not include "
+                            f"Premium reports ($1.00). Pro Pass "
+                            f"(${float(settings.PRO_PASS_PRICE_DEC):.2f}) required."
+                        ),
                     )
                 return None
             except ValueError:

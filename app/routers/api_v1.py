@@ -84,7 +84,7 @@ async def get_free_teaser(request: Request):
             "Base L2 DEX Whale Liquidity & Top Pools (/api/v1/base-dex-radar -> 0.05 USDC)",
             "Institutional M2M Quantitative Signals (/api/v1/deep-market-report -> 1.00 USDC)",
             f"24h Micro VIP Pass ({settings.VIP_PASS_MAX_CALLS} calls across micro feeds -> 2.00 USDC)",
-            f"24h Pro VIP Pass ({settings.PRO_PASS_MAX_CALLS} calls across all feeds including Deep Reports -> 10.00 USDC)",
+            f"24h Pro VIP Pass ({settings.PRO_PASS_MAX_CALLS} calls across all feeds including Deep Reports -> {float(settings.PRO_PASS_PRICE_DEC):.2f} USDC)",
         ],
         "meta": pulse.get("meta", {}),
         "payment_recipient_base_usdc": settings.WALLET_ADDRESS,
@@ -539,6 +539,28 @@ async def get_dynamic_trending_endpoint(slug: str, request: Request):
             "payload": sample_payload,
         }
 
+    if canonical_match and trending_feed.get("source") == "static_seed":
+        # Y2: never sell hardcoded seed values. Report the upstream outage and charge nothing.
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "DATA_QUALITY_UNAVAILABLE",
+                "error": (
+                    "Upstream DEX feed is degraded. Paid live data is withheld rather than "
+                    "selling hardcoded seed values. No payment was requested or charged."
+                ),
+                "retry_after_seconds": 60,
+                "feed": f"/api/v1/trending/{clean_slug}",
+                "meta": {
+                    "source": trending_feed.get("source"),
+                    "fallback_reason": trending_feed.get("fallback_reason"),
+                    "free_feed": "/api/v1/trending",
+                    "sample_url": f"/api/v1/trending/{clean_slug}?sample=true",
+                },
+            },
+            headers={"Retry-After": "60"},
+        )
+
     payment_check = await require_x402_payment(
         request=request,
         price_usdc=price_dec,
@@ -565,11 +587,15 @@ async def get_dynamic_trending_endpoint(slug: str, request: Request):
                 "dex": canonical_match.get("dex", "Aerodrome / Base"),
                 "liquidity_class": canonical_match.get("liquidity_class", "DEEP_LIQUIDITY"),
                 "pool_age_days": canonical_match.get("pool_age_days"),
+                "is_stale": bool(canonical_match.get("is_stale", False)),
+                "is_synthetic": bool(canonical_match.get("is_synthetic", False)),
             },
             "meta": {
                 "source": trending_feed.get("source", "dexscreener_base_live"),
                 "as_of": trending_feed.get("data_as_of"),
                 "data_age_seconds": trending_feed.get("data_age_seconds"),
+                "is_stale": bool(trending_feed.get("is_stale", False)),
+                "fallback_reason": trending_feed.get("fallback_reason"),
                 "disclaimer": "Informational quantitative market data only. Not financial, trading, or investment advice.",
             },
         }

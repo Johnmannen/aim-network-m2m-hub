@@ -5,6 +5,7 @@ with an in-memory 60-second TTL cache to guarantee < 0.15s M2M response time,
 plus deterministic fallback if external APIs are rate-limited or offline.
 """
 
+import asyncio
 import logging
 import math
 import time
@@ -16,6 +17,29 @@ logger = logging.getLogger(__name__)
 CACHE_TTL_SECONDS = 60.0
 
 _cache_store: Dict[str, Dict[str, Any]] = {}
+
+# Y1: when DexScreener throttles this host, serve the last real observation with an
+# honest age instead of silently swapping in hardcoded seed values.
+TRENDING_LAST_GOOD_SOURCE = "dexscreener_base_live_last_good"
+TRENDING_LAST_GOOD_MAX_AGE_SECONDS = 6 * 3600
+_last_good_live: Dict[str, Any] = {}
+
+# Y5: canonical slugs are defined here so startup can register them in dynamic_endpoints,
+# which keeps their discovery links stable and their telemetry countable across DB resets.
+CANONICAL_TRENDING_ENDPOINTS = (
+    {
+        "slug": "morpho",
+        "asset_name": "Morpho",
+        "asset_symbol": "MORPHO",
+        "price_usdc": 0.05,
+    },
+    {
+        "slug": "virtual",
+        "asset_name": "Virtual Protocol",
+        "asset_symbol": "VIRTUAL",
+        "price_usdc": 0.05,
+    },
+)
 
 MARKET_DISCLAIMER = (
     "Informational quantitative market data only. Not financial, trading, or investment advice."
@@ -515,11 +539,16 @@ async def fetch_trending_dex_tokens() -> Dict[str, Any]:
     if cached:
         is_stale = cached.get("is_stale", False)
         fetched_at_ts = cached.get("_fetched_ts")
-        age_seconds = (
-            None
-            if is_stale
-            else (max(0, int(now_ts - fetched_at_ts)) if fetched_at_ts else None)
-        )
+        observed_ts = cached.get("_observed_ts")
+        if is_stale:
+            # Stale live data keeps its real observation time; seed fallback has none at all.
+            age_seconds = (
+                max(0, int(now_ts - observed_ts)) if observed_ts else None
+            )
+        else:
+            age_seconds = (
+                max(0, int(now_ts - fetched_at_ts)) if fetched_at_ts else None
+            )
         return {
             "tokens": cached["tokens"],
             "data_as_of": cached.get("data_as_of"),
@@ -577,24 +606,58 @@ async def fetch_trending_dex_tokens() -> Dict[str, Any]:
         "Accept": "application/json",
     }
 
-    try:
-        async with httpx.AsyncClient(timeout=8.0, headers=headers, follow_redirects=True) as client:
-            resp = await client.get(url)
-            if resp.status_code == 200:
-                raw_pairs = resp.json().get("pairs")
-                if raw_pairs and isinstance(raw_pairs, list):
-                    all_pairs = raw_pairs
-                    is_live = True
-                else:
+    # Y1: shared cloud egress IPs get throttled, so try both public endpoints with one backoff retry.
+    candidate_urls = (
+        url,
+        f"https://api.dexscreener.com/tokens/v1/base/{addrs_str}",
+    )
+    for attempt in range(2):
+        for candidate_url in candidate_urls:
+            try:
+                async with httpx.AsyncClient(timeout=8.0, headers=headers, follow_redirects=True) as client:
+                    resp = await client.get(candidate_url)
+                if resp.status_code == 200:
+                    body = resp.json()
+                    raw_pairs = body.get("pairs") if isinstance(body, dict) else body
+                    if raw_pairs and isinstance(raw_pairs, list):
+                        all_pairs = raw_pairs
+                        is_live = True
+                        break
                     fallback_reason = "DexScreener returned empty pairs list"
-            else:
-                fallback_reason = f"DexScreener HTTP {resp.status_code}"
-                logger.warning("DexScreener multi-token live fetch non-200: %d", resp.status_code)
-    except Exception as exc:
-        fallback_reason = f"DexScreener fetch error: {type(exc).__name__}"
-        logger.warning("DexScreener multi-token live fetch failed: %s", exc)
+                else:
+                    fallback_reason = f"DexScreener HTTP {resp.status_code}"
+                    logger.warning(
+                        "DexScreener fetch non-200 (%d) from %s (attempt %d)",
+                        resp.status_code,
+                        candidate_url,
+                        attempt + 1,
+                    )
+            except Exception as exc:
+                fallback_reason = f"DexScreener fetch error: {type(exc).__name__}"
+                logger.warning("DexScreener fetch failed (%s): %s", candidate_url, exc)
+        if is_live:
+            break
+        if attempt == 0:
+            await asyncio.sleep(0.5)
 
     if not is_live:
+        last_good = _last_good_live.get("payload")
+        if last_good:
+            observed_ts = last_good.get("_fetched_ts") or now_ts
+            age_seconds = max(0, int(now_ts - observed_ts))
+            if age_seconds <= TRENDING_LAST_GOOD_MAX_AGE_SECONDS:
+                last_good_payload = {
+                    "tokens": [dict(t, is_stale=True) for t in last_good["tokens"]],
+                    "data_as_of": last_good.get("data_as_of"),
+                    "data_age_seconds": age_seconds,
+                    "_fetched_ts": now_ts,
+                    "_observed_ts": observed_ts,
+                    "source": TRENDING_LAST_GOOD_SOURCE,
+                    "is_stale": True,
+                    "fallback_reason": fallback_reason,
+                }
+                _set_cached(cache_key, last_good_payload)
+                return last_good_payload
         source_label = "static_seed"
         for item in tokens_config:
             fb = item["fallback"]
@@ -683,10 +746,16 @@ async def fetch_trending_dex_tokens() -> Dict[str, Any]:
         })
 
     fetched_iso = now_dt.isoformat()
+    _last_good_live["payload"] = {
+        "tokens": fetched_tokens,
+        "data_as_of": fetched_iso,
+        "_fetched_ts": now_ts,
+    }
     cache_payload = {
         "tokens": fetched_tokens,
         "data_as_of": fetched_iso,
         "_fetched_ts": now_ts,
+        "_observed_ts": now_ts,
         "source": source_label,
         "is_stale": False,
         "fallback_reason": None,

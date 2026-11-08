@@ -40,12 +40,34 @@ async def _autopilot_scout_loop(db_path: str | None) -> None:
         await asyncio.sleep(max(60, settings.SCOUT_INTERVAL_SECONDS))
 
 
+def _bootstrap_canonical_endpoints(db_path: str | None) -> None:
+    """Y5: register code-defined trending slugs so links and telemetry survive DB resets."""
+    from app.database import register_dynamic_endpoint
+    from app.services.market_data import CANONICAL_TRENDING_ENDPOINTS
+
+    for asset in CANONICAL_TRENDING_ENDPOINTS:
+        try:
+            register_dynamic_endpoint(
+                slug=asset["slug"],
+                asset_name=asset["asset_name"],
+                asset_symbol=asset["asset_symbol"],
+                coingecko_id=asset["slug"],
+                price_usdc=asset["price_usdc"],
+                db_path=db_path,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Canonical endpoint bootstrap failed for %s: %s", asset["slug"], exc
+            )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.started_at = time.time()
     app.state.instance_id = f"inst_{uuid.uuid4().hex[:12]}"
     db_override = getattr(app.state, "db_path", None)
     init_db(db_override)
+    _bootstrap_canonical_endpoints(db_override)
     app.state.http_client = httpx.AsyncClient(timeout=5.0)
     scout_task = None
     if settings.SCOUT_AUTOPILOT_ENABLED:

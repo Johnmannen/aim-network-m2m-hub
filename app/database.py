@@ -425,16 +425,38 @@ def increment_dynamic_endpoint_stats(
     """Increment call counter and revenue on a specific dynamic endpoint."""
     init_db(db_path)
     clean_amount = float(Decimal(str(amount_usdc)))
+    clean_slug = slug.lower().strip()
     with get_connection(db_path) as conn:
-        conn.execute(
+        cursor = conn.execute(
             """
             UPDATE dynamic_endpoints
             SET calls_count = calls_count + 1,
                 revenue_usdc = ROUND(revenue_usdc + ?, 4)
             WHERE slug = ?;
             """,
-            (clean_amount, slug.lower().strip()),
+            (clean_amount, clean_slug),
         )
+        if cursor.rowcount == 0:
+            # Canonical trending slugs are defined in code, not seeded in this table.
+            # Upsert keeps their call/revenue telemetry countable instead of silently lost.
+            conn.execute(
+                """
+                INSERT INTO dynamic_endpoints
+                (slug, endpoint_path, asset_name, asset_symbol, coingecko_id,
+                 price_usdc, calls_count, revenue_usdc, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?);
+                """,
+                (
+                    clean_slug,
+                    f"/api/v1/trending/{clean_slug}",
+                    clean_slug.capitalize(),
+                    clean_slug.upper(),
+                    clean_slug,
+                    clean_amount,
+                    clean_amount,
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
         conn.commit()
 
 
@@ -461,10 +483,12 @@ def check_and_use_vip_pass(
         if now_dt >= expires_dt or row["calls_used"] >= row["max_calls"]:
             return None
 
-        # Margin Protection: Welcome Bonus (0.0) and Micro VIP passes (<10.0)
-        # apply only to micro ($0.01-$0.05) and dynamic_scout tiers.
-        # Premium tier ($1.00 Deep Market Report) requires Pro Pass (>=10.0) or standard payment.
-        if tier == "premium" and float(row["amount_usdc"]) < 10.0:
+        # Margin Protection: Welcome Bonus (0.0) and Micro VIP passes below the Pro
+        # price apply only to micro ($0.01-$0.05) and dynamic_scout tiers.
+        # Premium tier ($1.00 Deep Market Report) requires a Pro Pass or standard payment.
+        if tier == "premium" and float(row["amount_usdc"]) < float(
+            settings.PRO_PASS_PRICE_DEC
+        ):
             return None
 
         conn.execute(
@@ -496,7 +520,11 @@ def get_vip_pass(
         if not row:
             return None
         d = dict(row)
-        d["tier"] = "pro" if float(d["amount_usdc"]) >= 10.0 else "micro"
+        d["tier"] = (
+            "pro"
+            if float(d["amount_usdc"]) >= float(settings.PRO_PASS_PRICE_DEC)
+            else "micro"
+        )
         return d
 
 
@@ -517,7 +545,10 @@ def create_vip_pass(
     now_dt = datetime.now(timezone.utc)
     now_iso = now_dt.isoformat()
     clean_amount = float(Decimal(str(amount_usdc)))
-    is_pro = clean_amount >= 10.0 or str(tier).lower() in ("pro", "premium_pro")
+    is_pro = clean_amount >= float(settings.PRO_PASS_PRICE_DEC) or str(tier).lower() in (
+        "pro",
+        "premium_pro",
+    )
     pass_tier = "pro" if is_pro else "micro"
     max_quota = settings.PRO_PASS_MAX_CALLS if is_pro else settings.VIP_PASS_MAX_CALLS
     duration_hours = settings.PRO_PASS_DURATION_HOURS if is_pro else settings.VIP_PASS_DURATION_HOURS
