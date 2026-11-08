@@ -28,7 +28,6 @@ from app.database import (
     is_first_time_buyer,
     record_paid_call,
 )
-from app.services.cloud_backup import push_to_cloud_gist
 
 logger = logging.getLogger(__name__)
 
@@ -423,8 +422,6 @@ async def require_x402_payment(
                     verified_mode="onchain_vip",
                     db_path=db_path,
                 )
-                if not settings.TESTING:
-                    asyncio.create_task(push_to_cloud_gist(db_path=db_path))
                 return None
             except ValueError:
                 return _quote(
@@ -467,8 +464,6 @@ async def require_x402_payment(
             )
             request.state.welcome_bonus_unlocked = True
             request.state.bonus_tx_hash = payment_proof
-        if not settings.TESTING:
-            asyncio.create_task(push_to_cloud_gist(db_path=db_path))
     except ValueError:
         return _quote(
             price_usdc,

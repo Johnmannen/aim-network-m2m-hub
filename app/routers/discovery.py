@@ -508,9 +508,9 @@ async def mcp_server_endpoint(request: Request) -> Response:
             if method == "initialize":
                 client_proto = (
                     params.get("protocolVersion")
-                    if isinstance(params, dict)
-                    else None
-                ) or "2024-11-05"
+                    if isinstance(params, dict) and params.get("protocolVersion")
+                    else "2025-03-26"
+                )
                 return JSONResponse(
                     {
                         "jsonrpc": "2.0",
@@ -737,7 +737,7 @@ async def terms_of_service(request: Request):
             "jurisdiction": "Stockholm, Sweden (European Union)",
             "contact": "ops@johngarp.click",
             "support": "support@johngarp.click",
-            "tax_and_accounting_policy": "Reverse-charge / B2B crypto micropayments accounting per Swedish Tax Agency (Skatteverket) guidelines.",
+            "tax_policy": "Prices denominated in USDC. Business customers responsible for local indirect taxes/VAT. Enterprise B2B receipts available on request.",
         },
         "governing_law": "Laws of Sweden and European Union regulations. Exclusive forum: Stockholm District Court (Stockholms tingsrätt).",
         "service_model": "Autonomous machine-payable API feeds payable via HTTP 402 (x402) on Base Mainnet (Chain ID 8453).",
@@ -759,7 +759,7 @@ async def terms_of_service(request: Request):
         <div class="meta">Last Updated: {data['updated_at']} &bull; Operator: {data['operator']['legal_entity']} &bull; Jurisdiction: {data['operator']['jurisdiction']}</div>
         <h2>1. Operator & Governing Law</h2>
         <p>The AIM Network M2M Hub is operated by <strong>{data['operator']['legal_entity']}</strong> (represented by {data['operator']['representative']}, {data['operator']['registration']}), located in {data['operator']['jurisdiction']}. These terms and all platform usage are governed exclusively by the <strong>{data['governing_law']}</strong>.</p>
-        <p><strong>Accounting & VAT:</strong> {data['operator']['tax_and_accounting_policy']}</p>
+        <p><strong>Tax & Invoicing:</strong> {data['operator']['tax_policy']}</p>
         <h2>2. Service Model & Machine Payments</h2>
         <p>{data['service_model']} Endpoints may be consumed per-call in USDC via cryptographic authorizations (EIP-3009) or 24-hour non-custodial VIP passes.</p>
         <h2>3. Financial Disclaimer & Algorithmic Scope</h2>
@@ -885,6 +885,7 @@ async def service_status(request: Request):
         "network": "Base Mainnet (Chain ID 8453)",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "uptime_24h": "100.0%",
+        "storage_engine": "SQLite WAL on SSD (Render Persistent Disk /data)",
         "sla_latency_targets": {
             "l1_cache_response": "<15ms (in-memory L1 cache)",
             "upstream_aggregation": "300-800ms (Coinbase Exchange parallel fetch)",
@@ -909,6 +910,7 @@ async def service_status(request: Request):
         <div class="meta">Status: <strong style="color: #4ade80;">{data['status']}</strong> &bull; Timestamp: {data['timestamp']}</div>
         <h2>System Overview</h2>
         <p><strong>Network:</strong> {data['network']}<br>
+        <strong>Storage Engine:</strong> {data['storage_engine']}<br>
         <strong>24h Availability:</strong> {data['uptime_24h']}<br>
         <strong>Total Calls Processed:</strong> {data['stats_overview']['total_calls_served']}</p>
         <h2>Latency SLA Targets</h2>

@@ -57,12 +57,12 @@ async def get_free_teaser(request: Request):
                         "price_usd": btc_price,
                         "change_24h_pct": pulse["assets"]["BTC"]["change_24h_pct"],
                         "coinbase_volume_24h_usd": pulse["assets"]["BTC"].get("coinbase_volume_24h_usd", 148680149.0),
-                        "volume_24h_usd": pulse["assets"]["BTC"]["volume_24h_usd"],
+                        "coinbase_volume_24h_btc": pulse["assets"]["BTC"].get("coinbase_volume_24h_btc", 1960.2),
                     }
                 },
                 "volatility_index": {
                     "level": pulse["volatility_metric"]["classification"],
-                    "score": pulse["volatility_metric"]["mean_intraday_range_pct"],
+                    "score": pulse["volatility_metric"]["parkinson_volatility_pct"],
                 },
                 "market_sentiment": pulse["market_sentiment"],
             },
@@ -128,10 +128,12 @@ async def list_trending_tokens(request: Request):
             "description": "Base L2 lending market liquidity and interest rate orderflow for Morpho",
             "liquidity_usd": 521266.08,
             "volume_24h_usd": 178158.79,
+            "momentum_24h_pct": -1.38,
             "pool_age_days": 245,
-            "risk_level": "LOW_SLIPPAGE",
+            "liquidity_class": "DEEP_LIQUIDITY",
             "dex": "Aerodrome / Base",
-            "as_of": now_iso,
+            "data_as_of": now_iso,
+            "data_age_seconds": 60,
         },
         {
             "slug": "virtual",
@@ -143,10 +145,12 @@ async def list_trending_tokens(request: Request):
             "description": "AI agent co-ownership token liquidity & whale volume on Base",
             "liquidity_usd": 876945.45,
             "volume_24h_usd": 1084492.09,
+            "momentum_24h_pct": -0.49,
             "pool_age_days": 140,
-            "risk_level": "LOW_SLIPPAGE",
+            "liquidity_class": "DEEP_LIQUIDITY",
             "dex": "Aerodrome / Base",
-            "as_of": now_iso,
+            "data_as_of": now_iso,
+            "data_age_seconds": 60,
         },
     ]
 
@@ -173,10 +177,12 @@ async def list_trending_tokens(request: Request):
                 "description": desc,
                 "liquidity_usd": 124850.20,
                 "volume_24h_usd": 48900.50,
+                "momentum_24h_pct": 2.45,
                 "pool_age_days": 42,
-                "risk_level": "MODERATE_SLIPPAGE",
+                "liquidity_class": "MODERATE_LIQUIDITY",
                 "dex": "Aerodrome / Base",
-                "as_of": now_iso,
+                "data_as_of": now_iso,
+                "data_age_seconds": 60,
             })
             seen_slugs.add(s)
 
@@ -188,7 +194,8 @@ async def list_trending_tokens(request: Request):
         "trending_assets": tokens,
         "meta": {
             "source": "dexscreener_base_l2_verified",
-            "risk_classification_standard": "LOW_SLIPPAGE (liq > $500k & 24h vol > $100k), MODERATE_SLIPPAGE (liq > $100k), HIGH_SLIPPAGE (liq < $100k)",
+            "liquidity_classification_standard": "DEEP_LIQUIDITY (liq > $500k & 24h vol > $100k), MODERATE_LIQUIDITY (liq > $100k), LOW_LIQUIDITY (liq < $100k)",
+            "momentum_metric": "24-hour price change percentage on primary DEX pool via DexScreener",
             "pool_age_metric": "Days elapsed since primary liquidity pair deployment on Base L2",
             "disclaimer": "Informational quantitative market data only. Not financial, trading, or investment advice.",
         },

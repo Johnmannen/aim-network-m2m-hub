@@ -6,6 +6,7 @@ plus deterministic fallback if external APIs are rate-limited or offline.
 """
 
 import logging
+import math
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -19,6 +20,13 @@ _cache_store: Dict[str, Dict[str, Any]] = {}
 MARKET_DISCLAIMER = (
     "Informational quantitative market data only. Not financial, trading, or investment advice."
 )
+
+
+def _calc_parkinson_volatility(high: float, low: float) -> float:
+    """Parkinson intraday volatility estimator: sqrt(1/(4*ln(2)) * (ln(high/low))^2)."""
+    if low <= 0 or high <= low:
+        return 0.0
+    return round(math.sqrt((1.0 / (4.0 * math.log(2.0))) * (math.log(high / low) ** 2)) * 100, 2)
 
 
 def _get_cached(key: str) -> Any:
@@ -84,7 +92,7 @@ async def _fetch_live_crypto_prices() -> Tuple[Dict[str, Any], List[str], str]:
                             prices[asset_key]["coinbase_24h_vol_usd"] = round(vol_base * last_val, 2)
                             prices[asset_key]["coinbase_24h_vol_base"] = vol_base
                         if low_val > 0:
-                            prices[asset_key]["intraday_volatility_pct"] = round(((high_val - low_val) / low_val) * 100, 2)
+                            prices[asset_key]["parkinson_volatility_pct"] = _calc_parkinson_volatility(high_val, low_val)
                             prices[asset_key]["high_usd"] = high_val
                             prices[asset_key]["low_usd"] = low_val
                         sources_used.append(src_tag)
@@ -163,12 +171,12 @@ async def fetch_crypto_pulse_data() -> Dict[str, Any]:
     else:
         sentiment = "bullish_momentum" if btc_change >= 0 else "bearish_consolidation"
 
-    btc_intra = float(prices.get("bitcoin", {}).get("intraday_volatility_pct", 0.0) or 0.0)
-    eth_intra = float(prices.get("ethereum", {}).get("intraday_volatility_pct", 0.0) or 0.0)
-    sol_intra = float(prices.get("solana", {}).get("intraday_volatility_pct", 0.0) or 0.0)
-    mean_intraday_vol = round((btc_intra + eth_intra + sol_intra) / 3.0, 2)
+    btc_parkinson = float(prices.get("bitcoin", {}).get("parkinson_volatility_pct", 0.0) or 0.0)
+    eth_parkinson = float(prices.get("ethereum", {}).get("parkinson_volatility_pct", 0.0) or 0.0)
+    sol_parkinson = float(prices.get("solana", {}).get("parkinson_volatility_pct", 0.0) or 0.0)
+    mean_parkinson = round((btc_parkinson + eth_parkinson + sol_parkinson) / 3.0, 2)
     vol_classification = (
-        "LOW (<1.5%)" if mean_intraday_vol < 1.5 else ("MODERATE (1.5-4.0%)" if mean_intraday_vol < 4.0 else "HIGH (>4.0%)")
+        "LOW (<1.5%)" if mean_parkinson < 1.5 else ("MODERATE (1.5-4.0%)" if mean_parkinson < 4.0 else "HIGH (>4.0%)")
     )
     now_iso = datetime.now(timezone.utc).isoformat()
     latency_ms = round((time.perf_counter() - start_perf) * 1000, 1)
@@ -184,46 +192,37 @@ async def fetch_crypto_pulse_data() -> Dict[str, Any]:
         },
         "volatility_index_24h": avg_abs_move,
         "volatility_metric": {
-            "mean_intraday_range_pct": mean_intraday_vol,
+            "parkinson_volatility_pct": mean_parkinson,
             "mean_abs_move_24h_pct": avg_abs_move,
-            "formula": "mean((high - low) / low) * 100 Parkinson intraday range across BTC, ETH, SOL",
+            "formula": "Parkinson estimator: sqrt(1/(4*ln(2)) * (ln(high/low))^2)",
             "classification": vol_classification,
         },
         "assets": {
             "BTC": {
                 "price_usd": round(float(prices.get("bitcoin", {}).get("usd", 75850.0)), 2),
                 "change_24h_pct": round(btc_change, 2),
-                "intraday_range_pct": btc_intra,
+                "parkinson_volatility_pct": btc_parkinson,
                 "coinbase_volume_24h_usd": round(
                     float(prices.get("bitcoin", {}).get("coinbase_24h_vol_usd", prices.get("bitcoin", {}).get("usd_24h_vol", 0.0)) or 0.0), 2
                 ),
                 "coinbase_volume_24h_btc": round(
                     float(prices.get("bitcoin", {}).get("coinbase_24h_vol_base", 0.0) or 0.0), 4
                 ),
-                "volume_24h_usd": round(
-                    float(prices.get("bitcoin", {}).get("usd_24h_vol", 0.0) or 0.0), 2
-                ),
             },
             "ETH": {
                 "price_usd": round(float(prices.get("ethereum", {}).get("usd", 2238.0)), 2),
                 "change_24h_pct": round(eth_change, 2),
-                "intraday_range_pct": eth_intra,
+                "parkinson_volatility_pct": eth_parkinson,
                 "coinbase_volume_24h_usd": round(
                     float(prices.get("ethereum", {}).get("coinbase_24h_vol_usd", prices.get("ethereum", {}).get("usd_24h_vol", 0.0)) or 0.0), 2
-                ),
-                "volume_24h_usd": round(
-                    float(prices.get("ethereum", {}).get("usd_24h_vol", 0.0) or 0.0), 2
                 ),
             },
             "SOL": {
                 "price_usd": round(float(prices.get("solana", {}).get("usd", 89.6)), 2),
                 "change_24h_pct": round(sol_change, 2),
-                "intraday_range_pct": sol_intra,
+                "parkinson_volatility_pct": sol_parkinson,
                 "coinbase_volume_24h_usd": round(
                     float(prices.get("solana", {}).get("coinbase_24h_vol_usd", prices.get("solana", {}).get("usd_24h_vol", 0.0)) or 0.0), 2
-                ),
-                "volume_24h_usd": round(
-                    float(prices.get("solana", {}).get("usd_24h_vol", 0.0) or 0.0), 2
                 ),
             },
         },
