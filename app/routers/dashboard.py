@@ -601,11 +601,6 @@ async def root_entrypoint(request: Request) -> Response:
             return Response(status_code=200, media_type="application/json")
         return JSONResponse(content=manifest)
 
-    if has_valid_session(request):
-        if request.method == "HEAD":
-            return Response(status_code=200, media_type="text/html")
-        return _render_dashboard_html(request)
-
     if request.method == "HEAD":
         return Response(status_code=200, media_type="text/html")
     landing_template = _jinja_env.get_template("landing.html")

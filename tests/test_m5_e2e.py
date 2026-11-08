@@ -49,9 +49,9 @@ def test_full_end_to_end_system(tmp_path: Path):
         assert r_agents.status_code == 200
         assert len(r_agents.json()["endpoints"]) >= 4
 
-        # 2. Dashboard initial render
+        # 2. Dashboard initial render at /admin
         client.post("/api/admin/login", json={"pin": settings.ADMIN_PIN})
-        r_dash = client.get("/")
+        r_dash = client.get("/admin")
         assert r_dash.status_code == 200
         assert "AIM NETWORK — OVERSEER DASHBOARD" in r_dash.text
         assert "ONLINE" in r_dash.text
@@ -93,7 +93,7 @@ def test_full_end_to_end_system(tmp_path: Path):
         assert stats_data["calls_premium"] == 1
         assert stats_data["revenue_usdc"] == 1.01
 
-        r_dash_after = client.get("/")
+        r_dash_after = client.get("/admin")
         assert "$1.01 USDC" in r_dash_after.text
 
         # 6. PIN-protected Emergency Stop
