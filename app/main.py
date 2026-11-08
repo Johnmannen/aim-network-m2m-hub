@@ -217,6 +217,14 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "SAMEORIGIN"
+        if request.url.path.startswith("/api/") or request.url.path in (
+            "/llms.txt",
+            "/agents.json",
+            "/.well-known/agent.json",
+            "/mcp",
+        ):
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            response.headers["Pragma"] = "no-cache"
         return response
 
     app.add_middleware(
