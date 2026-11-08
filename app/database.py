@@ -403,13 +403,17 @@ def register_dynamic_endpoint(
                 now,
             ),
         )
-        # Prune oldest unused endpoints if exceeding 12 items (never delete active ones with calls_count > 0)
+        # Prune oldest unused scout endpoints if exceeding 12 items (never delete active ones or canonical slugs)
         conn.execute(
             """
             DELETE FROM dynamic_endpoints
-            WHERE calls_count = 0 AND slug NOT IN (
-                SELECT slug FROM dynamic_endpoints ORDER BY created_at DESC LIMIT 12
-            );
+            WHERE calls_count = 0
+              AND slug NOT IN ('morpho', 'virtual')
+              AND slug NOT IN (
+                  SELECT slug FROM dynamic_endpoints
+                  WHERE slug NOT IN ('morpho', 'virtual')
+                  ORDER BY created_at DESC LIMIT 12
+              );
             """
         )
         conn.commit()
@@ -439,6 +443,14 @@ def increment_dynamic_endpoint_stats(
         if cursor.rowcount == 0:
             # Canonical trending slugs are defined in code, not seeded in this table.
             # Upsert keeps their call/revenue telemetry countable instead of silently lost.
+            from app.services.market_data import CANONICAL_TRENDING_ENDPOINTS
+
+            canonical_meta = next(
+                (item for item in CANONICAL_TRENDING_ENDPOINTS if item["slug"] == clean_slug),
+                None,
+            )
+            asset_name = canonical_meta["asset_name"] if canonical_meta else clean_slug.capitalize()
+            asset_symbol = canonical_meta["asset_symbol"] if canonical_meta else clean_slug.upper()
             conn.execute(
                 """
                 INSERT INTO dynamic_endpoints
@@ -449,8 +461,8 @@ def increment_dynamic_endpoint_stats(
                 (
                     clean_slug,
                     f"/api/v1/trending/{clean_slug}",
-                    clean_slug.capitalize(),
-                    clean_slug.upper(),
+                    asset_name,
+                    asset_symbol,
                     clean_slug,
                     clean_amount,
                     clean_amount,

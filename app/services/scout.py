@@ -36,7 +36,11 @@ async def run_autonomous_scout(db_path: Optional[str] = None) -> Dict[str, Any]:
     price_suggestion = settings.PRICE_DYNAMIC_USDC
 
     try:
-        async with httpx.AsyncClient(timeout=3.5) as client:
+        headers = {
+            "User-Agent": "AIMNetwork-M2M/1.1 (+https://johngarp.click; mailto:ops@johngarp.click)",
+            "Accept": "application/json",
+        }
+        async with httpx.AsyncClient(timeout=3.5, headers=headers) as client:
             resp = await client.get("https://api.coingecko.com/api/v3/search/trending")
             if resp.status_code == 200:
                 coins = resp.json().get("coins", [])
@@ -47,6 +51,27 @@ async def run_autonomous_scout(db_path: Optional[str] = None) -> Dict[str, Any]:
                         chosen_name = item.get("name", chosen_name)
                         chosen_symbol = item.get("symbol", chosen_symbol).upper()
                         chosen_cg_id = item.get("id", chosen_cg_id)
+                        item_data = item.get("data") or {}
+                        raw_price = item_data.get("price")
+                        if isinstance(raw_price, (int, float)) and raw_price > 0:
+                            from datetime import datetime, timezone
+                            from app.services.market_data import _last_good_dynamic
+
+                            raw_vol_str = str(item_data.get("total_volume", "0")).replace("$", "").replace(",", "").strip()
+                            try:
+                                parsed_vol = round(float(raw_vol_str), 2)
+                            except ValueError:
+                                parsed_vol = 0.0
+                            chg_dict = item_data.get("price_change_percentage_24h") or {}
+                            parsed_chg = round(float(chg_dict.get("usd", 0.0) or 0.0), 2)
+                            now_dt = datetime.now(timezone.utc)
+                            _last_good_dynamic[sym] = {
+                                "price_usd": float(raw_price),
+                                "change_24h_pct": parsed_chg,
+                                "volume_24h_usd": parsed_vol,
+                                "data_as_of": now_dt.isoformat(),
+                                "_fetched_ts": now_dt.timestamp(),
+                            }
                         break
     except Exception as exc:
         logger.warning("CoinGecko trending fetch fallback triggered: %s", exc)

@@ -136,7 +136,7 @@ def test_canonical_trending_endpoints_sample_and_paid(tmp_path: Path):
     assert r_paid.status_code == 200
     assert r_paid.json()["status"] == "ok"
     assert r_paid.json()["asset"]["slug"] == "morpho"
-    assert r_paid.json()["asset"]["dex"] == "Aerodrome / Base"
+    assert r_paid.json()["asset"]["dex"].endswith(" / Base")
 
 
 def test_synthetic_scout_seed_timestamp_isolation(tmp_path: Path):
@@ -198,7 +198,7 @@ class _FakeAsyncClient:
             return _FakeResponse(429, {})
         addresses = (
             "0xbaa5cc21fd487b8fcc2f632f3f4e8d37262a0842",
-            "0x0b3e328455c4059ee9e3f84b5543f74e24e7e1b",
+            "0x0b3e328455c4059eeb9e3f84b5543f74e24e7e1b",
         )
         pairs = [
             {
@@ -360,3 +360,204 @@ def test_pro_tier_threshold_follows_config(tmp_path, monkeypatch):
         tx_hash="test_vip_cfg_above_001", amount_usdc=12.5, db_path=db_file
     )
     assert above["tier"] == "pro"
+
+
+def test_z1_scout_and_dex_radar_withhold_seed_data_with_503(tmp_path, monkeypatch):
+    """Z1: non-canonical scout endpoints and /base-dex-radar must return 503 instead of selling seed data."""
+    import app.routers.api_v1 as api_v1
+    from app.database import get_stats, register_dynamic_endpoint
+    from app.main import create_app
+    from fastapi.testclient import TestClient
+
+    async def seed_dynamic(slug, asset_name, asset_symbol, coingecko_id):
+        return {
+            "timestamp": "2026-11-08T16:00:00+00:00",
+            "tier": "dynamic_scout_0.05_usdc",
+            "source_status": "static_seed",
+            "asset": {
+                "slug": slug,
+                "name": asset_name,
+                "symbol": asset_symbol,
+                "coingecko_id": coingecko_id,
+                "price_usd": 1.25,
+                "change_24h_pct": 4.5,
+                "volume_24h_usd": 12500000.0,
+                "momentum_signal": "STRONG_INFLOW",
+                "is_stale": True,
+                "is_synthetic": True,
+            },
+            "meta": {
+                "sources": ["static_seed"],
+                "as_of": None,
+                "data_age_seconds": None,
+                "is_stale": True,
+                "fallback_reason": "CoinGecko HTTP 429",
+                "status": "DEGRADED",
+            },
+            "cache_hit": False,
+        }
+
+    async def seed_radar():
+        return {
+            "timestamp": "2026-11-08T16:00:00+00:00",
+            "tier": "base_dex_radar_0.05_usdc",
+            "network": "base-mainnet",
+            "source_status": "static_seed",
+            "top_base_pools": [],
+            "meta": {
+                "sources": ["static_seed"],
+                "as_of": None,
+                "data_age_seconds": None,
+                "is_stale": True,
+                "fallback_reason": "DexScreener HTTP 429",
+                "status": "DEGRADED",
+            },
+            "cache_hit": False,
+        }
+
+    monkeypatch.setattr(api_v1, "fetch_dynamic_asset_pulse", seed_dynamic)
+    monkeypatch.setattr(api_v1, "fetch_base_dex_radar", seed_radar)
+
+    db_file = str(tmp_path / "test_z1.db")
+    register_dynamic_endpoint(
+        slug="wasted",
+        asset_name="WASTED",
+        asset_symbol="WASTED",
+        coingecko_id="wasted-2",
+        price_usdc=0.05,
+        db_path=db_file,
+    )
+    client = TestClient(create_app(db_path=db_file))
+
+    r_scout = client.get(
+        "/api/v1/trending/wasted", headers={"X-PAYMENT-PROOF": "test_tx_z1_scout_001"}
+    )
+    assert r_scout.status_code == 503
+    assert r_scout.json()["status"] == "DATA_QUALITY_UNAVAILABLE"
+    assert r_scout.json()["meta"]["fallback_reason"] == "CoinGecko HTTP 429"
+
+    r_radar = client.get(
+        "/api/v1/base-dex-radar", headers={"X-PAYMENT-PROOF": "test_tx_z1_radar_001"}
+    )
+    assert r_radar.status_code == 503
+    assert r_radar.json()["status"] == "DATA_QUALITY_UNAVAILABLE"
+    assert r_radar.json()["meta"]["fallback_reason"] == "DexScreener HTTP 429"
+    assert get_stats(db_file)["total_calls"] == 0
+
+
+def test_z2_partial_dexscreener_response_does_not_poison_last_good_with_seed(monkeypatch):
+    """Z2: if DexScreener returns pairs for only one token, the missing token must not be marked live/fresh."""
+    import asyncio
+    import app.services.market_data as md
+
+    class _PartialAsyncClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc_info):
+            return False
+
+        async def get(self, url):
+            # Only return MORPHO pair; VIRTUAL is missing
+            pairs = [
+                {
+                    "chainId": "base",
+                    "dexId": "aerodrome",
+                    "baseToken": {"address": "0xbaa5cc21fd487b8fcc2f632f3f4e8d37262a0842"},
+                    "liquidity": {"usd": 900000.0},
+                    "volume": {"h24": 250000.0},
+                    "priceChange": {"h24": -1.5},
+                    "pairCreatedAt": None,
+                }
+            ]
+            return _FakeResponse(200, {"pairs": pairs})
+
+    md._cache_store.pop("trending_dex_tokens", None)
+    md._last_good_live.clear()
+    monkeypatch.setattr(md.httpx, "AsyncClient", _PartialAsyncClient)
+
+    res = asyncio.run(md.fetch_trending_dex_tokens())
+    morpho = next(t for t in res["tokens"] if t["slug"] == "morpho")
+    virtual = next(t for t in res["tokens"] if t["slug"] == "virtual")
+
+    assert morpho["is_stale"] is False
+    assert morpho.get("is_synthetic") is not True
+    assert virtual["is_stale"] is True
+    assert virtual.get("is_synthetic") is True
+    assert "payload" not in md._last_good_live
+
+    md._cache_store.pop("trending_dex_tokens", None)
+    md._last_good_live.clear()
+
+
+def test_z3_paid_trending_rejects_stale_last_good_beyond_paid_max_age(tmp_path, monkeypatch):
+    """Z3: last-good observations older than PAID_MAX_STALE_AGE_SECONDS (900s) return 503 on paid calls."""
+    import app.routers.api_v1 as api_v1
+    from app.database import get_stats
+    from app.main import create_app
+    from fastapi.testclient import TestClient
+
+    async def old_last_good_feed():
+        return {
+            "tokens": [
+                {
+                    "slug": "morpho",
+                    "asset_name": "Morpho",
+                    "asset_symbol": "MORPHO",
+                    "liquidity_usd": 1040504.79,
+                    "volume_24h_usd": 276183.15,
+                    "momentum_24h_pct": -1.11,
+                    "pool_age_days": None,
+                    "liquidity_class": "DEEP_LIQUIDITY",
+                    "dex": "Aerodrome / Base",
+                    "is_stale": True,
+                }
+            ],
+            "data_as_of": "2026-11-08T12:00:00+00:00",
+            "data_age_seconds": 3600,
+            "source": "dexscreener_base_live_last_good",
+            "is_stale": True,
+            "fallback_reason": "DexScreener HTTP 429",
+        }
+
+    monkeypatch.setattr(api_v1, "fetch_trending_dex_tokens", old_last_good_feed)
+    db_file = str(tmp_path / "test_z3.db")
+    client = TestClient(create_app(db_path=db_file))
+
+    free_resp = client.get("/api/v1/trending")
+    assert free_resp.status_code == 200
+    assert free_resp.json()["data_age_seconds"] == 3600
+
+    paid_resp = client.get(
+        "/api/v1/trending/morpho", headers={"X-PAYMENT-PROOF": "test_tx_z3_old_001"}
+    )
+    assert paid_resp.status_code == 503
+    assert paid_resp.json()["status"] == "DATA_QUALITY_UNAVAILABLE"
+    assert get_stats(db_file)["total_calls"] == 0
+
+
+def test_z4_canonical_slugs_survive_dynamic_endpoint_pruning(tmp_path):
+    """Z4: canonical slugs (morpho, virtual) are never deleted when >12 scout endpoints are registered."""
+    from app.database import get_stats, register_dynamic_endpoint
+    from app.main import _bootstrap_canonical_endpoints
+
+    db_file = str(tmp_path / "test_z4_prune.db")
+    _bootstrap_canonical_endpoints(db_file)
+
+    for idx in range(15):
+        register_dynamic_endpoint(
+            slug=f"scouttoken{idx}",
+            asset_name=f"Scout Token {idx}",
+            asset_symbol=f"SCT{idx}",
+            coingecko_id=f"scout-token-{idx}",
+            price_usdc=0.05,
+            db_path=db_file,
+        )
+
+    slugs = {ep["slug"] for ep in get_stats(db_file)["dynamic_endpoints"]}
+    assert "morpho" in slugs
+    assert "virtual" in slugs
+

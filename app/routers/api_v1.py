@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse, Response
 from app.config import settings
 from app.database import get_stats, increment_dynamic_endpoint_stats
 from app.services.market_data import (
+    PAID_MAX_STALE_AGE_SECONDS,
     fetch_base_dex_radar,
     fetch_crypto_pulse_data,
     fetch_deep_market_report,
@@ -125,10 +126,11 @@ async def list_trending_tokens(request: Request):
     tokens = []
     seen_slugs = set()
     for item in canonical_seed:
+        is_synth = bool(item.get("is_synthetic", False))
         tokens.append({
             **item,
-            "data_as_of": data_as_of,
-            "data_age_seconds": data_age_seconds,
+            "data_as_of": None if is_synth else data_as_of,
+            "data_age_seconds": None if is_synth else data_age_seconds,
         })
         seen_slugs.add(item["slug"])
 
@@ -290,6 +292,32 @@ async def get_base_dex_radar(request: Request):
             "payload": sample_payload,
         }
 
+    radar = await fetch_base_dex_radar()
+    radar_meta = radar.get("meta", {})
+    radar_age = radar_meta.get("data_age_seconds")
+    if (
+        radar.get("source_status") in ("static_seed", "fallback_resilient_feed")
+        or (radar_meta.get("is_stale") and radar_age is not None and radar_age > PAID_MAX_STALE_AGE_SECONDS)
+    ):
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "DATA_QUALITY_UNAVAILABLE",
+                "error": (
+                    "Upstream DEX feed is degraded. Paid live data is withheld rather than "
+                    "selling hardcoded seed values. No payment was requested or charged."
+                ),
+                "retry_after_seconds": 60,
+                "feed": "/api/v1/base-dex-radar",
+                "meta": {
+                    "source": radar.get("source_status"),
+                    "fallback_reason": radar_meta.get("fallback_reason"),
+                    "sample_url": "/api/v1/base-dex-radar?sample=true",
+                },
+            },
+            headers={"Retry-After": "60"},
+        )
+
     db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
     payment_check = await require_x402_payment(
         request=request,
@@ -301,7 +329,7 @@ async def get_base_dex_radar(request: Request):
     if payment_check:
         return payment_check
 
-    return await fetch_base_dex_radar()
+    return radar
 
 
 @router.api_route(
@@ -539,27 +567,67 @@ async def get_dynamic_trending_endpoint(slug: str, request: Request):
             "payload": sample_payload,
         }
 
-    if canonical_match and trending_feed.get("source") == "static_seed":
-        # Y2: never sell hardcoded seed values. Report the upstream outage and charge nothing.
-        return JSONResponse(
-            status_code=503,
-            content={
-                "status": "DATA_QUALITY_UNAVAILABLE",
-                "error": (
-                    "Upstream DEX feed is degraded. Paid live data is withheld rather than "
-                    "selling hardcoded seed values. No payment was requested or charged."
-                ),
-                "retry_after_seconds": 60,
-                "feed": f"/api/v1/trending/{clean_slug}",
-                "meta": {
-                    "source": trending_feed.get("source"),
-                    "fallback_reason": trending_feed.get("fallback_reason"),
-                    "free_feed": "/api/v1/trending",
-                    "sample_url": f"/api/v1/trending/{clean_slug}?sample=true",
+    dynamic_pulse = None
+    if canonical_match:
+        feed_age = trending_feed.get("data_age_seconds")
+        if (
+            trending_feed.get("source") == "static_seed"
+            or canonical_match.get("is_synthetic")
+            or (canonical_match.get("is_stale") and feed_age is not None and feed_age > PAID_MAX_STALE_AGE_SECONDS)
+        ):
+            # Y2/Z2/Z3: never sell hardcoded seed values or expired stale data. Report outage and charge nothing.
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "status": "DATA_QUALITY_UNAVAILABLE",
+                    "error": (
+                        "Upstream DEX feed is degraded. Paid live data is withheld rather than "
+                        "selling hardcoded seed values. No payment was requested or charged."
+                    ),
+                    "retry_after_seconds": 60,
+                    "feed": f"/api/v1/trending/{clean_slug}",
+                    "meta": {
+                        "source": trending_feed.get("source"),
+                        "fallback_reason": trending_feed.get("fallback_reason"),
+                        "free_feed": "/api/v1/trending",
+                        "sample_url": f"/api/v1/trending/{clean_slug}?sample=true",
+                    },
                 },
-            },
-            headers={"Retry-After": "60"},
+                headers={"Retry-After": "60"},
+            )
+    else:
+        dynamic_pulse = await fetch_dynamic_asset_pulse(
+            slug=clean_slug,
+            asset_name=matched["asset_name"],
+            asset_symbol=matched["asset_symbol"],
+            coingecko_id=matched["coingecko_id"],
         )
+        dyn_meta = dynamic_pulse.get("meta", {})
+        dyn_age = dyn_meta.get("data_age_seconds")
+        if (
+            dynamic_pulse.get("source_status") in ("static_seed", "fallback_resilient_feed")
+            or dynamic_pulse.get("asset", {}).get("is_synthetic")
+            or (dyn_meta.get("is_stale") and dyn_age is not None and dyn_age > PAID_MAX_STALE_AGE_SECONDS)
+        ):
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "status": "DATA_QUALITY_UNAVAILABLE",
+                    "error": (
+                        "Upstream market feed is degraded. Paid live data is withheld rather than "
+                        "selling hardcoded seed values. No payment was requested or charged."
+                    ),
+                    "retry_after_seconds": 60,
+                    "feed": f"/api/v1/trending/{clean_slug}",
+                    "meta": {
+                        "source": dynamic_pulse.get("source_status"),
+                        "fallback_reason": dyn_meta.get("fallback_reason"),
+                        "free_feed": "/api/v1/trending",
+                        "sample_url": f"/api/v1/trending/{clean_slug}?sample=true",
+                    },
+                },
+                headers={"Retry-After": "60"},
+            )
 
     payment_check = await require_x402_payment(
         request=request,
@@ -599,9 +667,4 @@ async def get_dynamic_trending_endpoint(slug: str, request: Request):
                 "disclaimer": "Informational quantitative market data only. Not financial, trading, or investment advice.",
             },
         }
-    return await fetch_dynamic_asset_pulse(
-        slug=clean_slug,
-        asset_name=matched["asset_name"],
-        asset_symbol=matched["asset_symbol"],
-        coingecko_id=matched["coingecko_id"],
-    )
+    return dynamic_pulse

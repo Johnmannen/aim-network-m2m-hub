@@ -340,7 +340,10 @@ async def run_agent_self_diagnosis(
     db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
     stats = get_stats(db_override)
     pulse = await fetch_crypto_pulse_data()
-    total_services = 3 + len(stats.get("dynamic_endpoints", []))
+    all_dyn = stats.get("dynamic_endpoints", [])
+    canonical_slugs = {"morpho", "virtual"}
+    scout_built_count = sum(1 for ep in all_dyn if ep.get("slug") not in canonical_slugs)
+    total_services = 3 + len(all_dyn)
 
     return {
         "overall_status": "ALL_AGENTS_OPERATIONAL",
@@ -348,7 +351,7 @@ async def run_agent_self_diagnosis(
             {
                 "name": "1. Spanar- & Bygg-Agent (Scout & Auto-Deployer)",
                 "status": "ONLINE",
-                "detail": f"Har byggt {len(stats.get('dynamic_endpoints', []))} st extra trend-API:er automatiskt. Söker nya var 60:e min.",
+                "detail": f"Har byggt {scout_built_count} st extra trend-API:er automatiskt (+ {len(all_dyn) - scout_built_count} kanoniska). Söker nya var 60:e min.",
             },
             {
                 "name": "2. Data- & Analys-Agent (Market Intelligence Engine)",

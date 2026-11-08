@@ -21,8 +21,12 @@ _cache_store: Dict[str, Dict[str, Any]] = {}
 # Y1: when DexScreener throttles this host, serve the last real observation with an
 # honest age instead of silently swapping in hardcoded seed values.
 TRENDING_LAST_GOOD_SOURCE = "dexscreener_base_live_last_good"
+DYNAMIC_LAST_GOOD_SOURCE = "coingecko_live_last_good"
 TRENDING_LAST_GOOD_MAX_AGE_SECONDS = 6 * 3600
+PAID_MAX_STALE_AGE_SECONDS = 900
 _last_good_live: Dict[str, Any] = {}
+_last_good_dynamic: Dict[str, Dict[str, Any]] = {}
+_last_good_dex_radar: Dict[str, Any] = {}
 
 # Y5: canonical slugs are defined here so startup can register them in dynamic_endpoints,
 # which keeps their discovery links stable and their telemetry countable across DB resets.
@@ -369,16 +373,28 @@ async def fetch_dynamic_asset_pulse(
     """
     cache_key = f"dynamic_{slug}"
     cached = _get_cached(cache_key)
+    now_dt = datetime.now(timezone.utc)
+    now_ts = now_dt.timestamp()
     if cached:
-        return {**cached, "cache_hit": True}
+        observed_ts = cached.get("_observed_ts")
+        meta = dict(cached.get("meta", {}))
+        if meta.get("as_of") and observed_ts:
+            meta["data_age_seconds"] = max(0, int(now_ts - observed_ts))
+        return {**cached, "meta": meta, "cache_hit": True}
 
     price_usd = 1.25
     change_24h = 4.5
     vol_24h = 12500000.0
-    source_status = "fallback_resilient_feed"
+    source_status = "static_seed"
+    is_live = False
+    fallback_reason = None
+    headers = {
+        "User-Agent": "AIMNetwork-M2M/1.1 (+https://johngarp.click; mailto:ops@johngarp.click)",
+        "Accept": "application/json",
+    }
 
     try:
-        async with httpx.AsyncClient(timeout=3.5) as client:
+        async with httpx.AsyncClient(timeout=4.5, headers=headers) as client:
             resp = await client.get(
                 "https://api.coingecko.com/api/v3/simple/price",
                 params={
@@ -395,13 +411,54 @@ async def fetch_dynamic_asset_pulse(
                     change_24h = round(float(data.get("usd_24h_change", 0.0) or 0.0), 2)
                     vol_24h = round(float(data.get("usd_24h_vol", 0.0) or 0.0), 2)
                     source_status = "coingecko_live"
+                    is_live = True
+                else:
+                    fallback_reason = f"CoinGecko missing usd price for {coingecko_id}"
+            else:
+                fallback_reason = f"CoinGecko HTTP {resp.status_code}"
     except Exception as exc:
-        logger.warning("Base DEX radar fallback triggered: %s", exc)
+        fallback_reason = f"CoinGecko fetch error: {type(exc).__name__}"
+        logger.warning("Dynamic asset pulse fallback triggered for %s: %s", slug, exc)
+
+    now_iso = now_dt.isoformat()
+    if is_live:
+        is_stale = False
+        is_synthetic = False
+        as_of = now_iso
+        age_seconds = 0
+        observed_ts = now_ts
+        _last_good_dynamic[slug] = {
+            "price_usd": price_usd,
+            "change_24h_pct": change_24h,
+            "volume_24h_usd": vol_24h,
+            "data_as_of": now_iso,
+            "_fetched_ts": now_ts,
+        }
+    else:
+        last_good = _last_good_dynamic.get(slug)
+        if last_good and (now_ts - last_good.get("_fetched_ts", now_ts)) <= TRENDING_LAST_GOOD_MAX_AGE_SECONDS:
+            price_usd = last_good["price_usd"]
+            change_24h = last_good["change_24h_pct"]
+            vol_24h = last_good["volume_24h_usd"]
+            source_status = DYNAMIC_LAST_GOOD_SOURCE
+            is_stale = True
+            is_synthetic = False
+            observed_ts = last_good["_fetched_ts"]
+            as_of = last_good["data_as_of"]
+            age_seconds = max(0, int(now_ts - observed_ts))
+        else:
+            source_status = "static_seed"
+            is_stale = True
+            is_synthetic = True
+            observed_ts = None
+            as_of = None
+            age_seconds = None
 
     result = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": now_iso,
         "tier": "dynamic_scout_0.05_usdc",
         "source_status": source_status,
+        "_observed_ts": observed_ts,
         "asset": {
             "slug": slug,
             "name": asset_name,
@@ -411,11 +468,16 @@ async def fetch_dynamic_asset_pulse(
             "change_24h_pct": change_24h,
             "volume_24h_usd": vol_24h,
             "momentum_signal": "STRONG_INFLOW" if change_24h >= 2.0 else "NEUTRAL_FLOW",
+            "is_stale": is_stale,
+            "is_synthetic": is_synthetic,
         },
         "meta": {
             "sources": [source_status],
-            "as_of": datetime.now(timezone.utc).isoformat(),
-            "status": "LIVE_FEED_VERIFIED" if "live" in source_status else "DEGRADED",
+            "as_of": as_of,
+            "data_age_seconds": age_seconds,
+            "is_stale": is_stale,
+            "fallback_reason": fallback_reason,
+            "status": "LIVE_FEED_VERIFIED" if is_live else "DEGRADED",
             "disclaimer": MARKET_DISCLAIMER,
         },
         "cache_hit": False,
@@ -430,19 +492,27 @@ async def fetch_base_dex_radar() -> Dict[str, Any]:
     via DexScreener Public API (with 60s TTL cache & resilient fallback).
     """
     cached = _get_cached("base_dex_radar")
+    now_dt = datetime.now(timezone.utc)
+    now_ts = now_dt.timestamp()
     if cached:
-        return {**cached, "cache_hit": True}
+        observed_ts = cached.get("_observed_ts")
+        meta = dict(cached.get("meta", {}))
+        if meta.get("as_of") and observed_ts:
+            meta["data_age_seconds"] = max(0, int(now_ts - observed_ts))
+        return {**cached, "meta": meta, "cache_hit": True}
 
-    pools = [
+    seed_pools = [
         {
             "pair": "WETH / USDC",
-            "dex": "Aerodrome",
+            "dex": "Aerodrome / Base",
             "chain": "base",
             "price_usd": 3120.50,
             "volume_24h_usd": 84500000.0,
             "liquidity_usd": 41200000.0,
             "price_change_h24_pct": 2.15,
             "whale_flow_signal": "HIGH_INSTITUTIONAL_DEPTH",
+            "is_stale": True,
+            "is_synthetic": True,
         },
         {
             "pair": "VIRTUAL / WETH",
@@ -453,25 +523,37 @@ async def fetch_base_dex_radar() -> Dict[str, Any]:
             "liquidity_usd": 8900000.0,
             "price_change_h24_pct": 8.40,
             "whale_flow_signal": "ACCUMULATION_SPIKE",
+            "is_stale": True,
+            "is_synthetic": True,
         },
         {
             "pair": "AERO / USDC",
-            "dex": "Aerodrome",
+            "dex": "Aerodrome / Base",
             "chain": "base",
             "price_usd": 1.32,
             "volume_24h_usd": 24100000.0,
             "liquidity_usd": 16500000.0,
             "price_change_h24_pct": 4.10,
             "whale_flow_signal": "STRONG_BUY_PRESSURE",
+            "is_stale": True,
+            "is_synthetic": True,
         },
     ]
-    source_status = "fallback_resilient_feed"
+    pools = seed_pools
+    source_status = "static_seed"
+    is_live = False
+    fallback_reason = None
+    headers = {
+        "User-Agent": "AIMNetwork-M2M/1.1 (+https://johngarp.click; mailto:ops@johngarp.click)",
+        "Accept": "application/json",
+    }
 
-    try:
-        async with httpx.AsyncClient(timeout=3.5) as client:
-            resp = await client.get(
-                "https://api.dexscreener.com/latest/dex/search?q=WETH%20USDC%20base"
-            )
+    for attempt in range(2):
+        try:
+            async with httpx.AsyncClient(timeout=4.5, headers=headers) as client:
+                resp = await client.get(
+                    "https://api.dexscreener.com/latest/dex/search?q=WETH%20USDC%20base"
+                )
             if resp.status_code == 200:
                 pairs = [
                     p
@@ -486,10 +568,16 @@ async def fetch_base_dex_radar() -> Dict[str, Any]:
                         vol24 = float(p.get("volume", {}).get("h24", 0.0) or 0.0)
                         liq = float(p.get("liquidity", {}).get("usd", 0.0) or 0.0)
                         chg24 = float(p.get("priceChange", {}).get("h24", 0.0) or 0.0)
+                        raw_dex = (p.get("dexId") or "base-dex").lower()
+                        dex_name = (
+                            "Aerodrome / Base"
+                            if raw_dex in ("aero", "aerodrome")
+                            else f"{raw_dex.capitalize()} / Base"
+                        )
                         live_pools.append(
                             {
                                 "pair": f"{base_sym} / {quote_sym}",
-                                "dex": p.get("dexId", "base-dex"),
+                                "dex": dex_name,
                                 "pair_address": p.get("pairAddress", ""),
                                 "price_usd": float(p.get("priceUsd", 0.0) or 0.0),
                                 "volume_24h_usd": round(vol24, 2),
@@ -500,24 +588,65 @@ async def fetch_base_dex_radar() -> Dict[str, Any]:
                                     if vol24 > liq * 0.8
                                     else "STEADY_LIQUIDITY"
                                 ),
+                                "is_stale": False,
+                                "is_synthetic": False,
                             }
                         )
                     pools = live_pools
                     source_status = "dexscreener_base_live"
-    except Exception as exc:
-        logger.warning("Base DEX radar fallback triggered: %s", exc)
+                    is_live = True
+                    break
+                fallback_reason = "DexScreener search returned empty Base pairs"
+            else:
+                fallback_reason = f"DexScreener HTTP {resp.status_code}"
+        except Exception as exc:
+            fallback_reason = f"DexScreener fetch error: {type(exc).__name__}"
+            logger.warning("Base DEX radar fallback triggered: %s", exc)
+        if attempt == 0:
+            await asyncio.sleep(0.5)
+
+    now_iso = now_dt.isoformat()
+    if is_live:
+        is_stale = False
+        as_of = now_iso
+        age_seconds = 0
+        observed_ts = now_ts
+        _last_good_dex_radar["payload"] = {
+            "pools": pools,
+            "data_as_of": now_iso,
+            "_fetched_ts": now_ts,
+        }
+    else:
+        last_good = _last_good_dex_radar.get("payload")
+        if last_good and (now_ts - last_good.get("_fetched_ts", now_ts)) <= TRENDING_LAST_GOOD_MAX_AGE_SECONDS:
+            pools = [dict(p, is_stale=True, is_synthetic=False) for p in last_good["pools"]]
+            source_status = TRENDING_LAST_GOOD_SOURCE
+            is_stale = True
+            observed_ts = last_good["_fetched_ts"]
+            as_of = last_good["data_as_of"]
+            age_seconds = max(0, int(now_ts - observed_ts))
+        else:
+            source_status = "static_seed"
+            is_stale = True
+            observed_ts = None
+            as_of = None
+            age_seconds = None
 
     payload = {
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": now_iso,
         "tier": "base_dex_radar_0.05_usdc",
         "network": "base-mainnet",
         "source_status": source_status,
+        "_observed_ts": observed_ts,
         "top_base_pools": pools,
         "summary": f"Tracking {len(pools)} high-velocity Base L2 liquidity pools in real time.",
         "meta": {
             "sources": [source_status],
-            "as_of": datetime.now(timezone.utc).isoformat(),
-            "status": "LIVE_FEED_VERIFIED" if "live" in source_status else "DEGRADED",
+            "as_of": as_of,
+            "data_age_seconds": age_seconds,
+            "is_stale": is_stale,
+            "fallback_reason": fallback_reason,
+            "status": "LIVE_FEED_VERIFIED" if is_live else "DEGRADED",
             "disclaimer": MARKET_DISCLAIMER,
         },
         "cache_hit": False,
@@ -692,6 +821,13 @@ async def fetch_trending_dex_tokens() -> Dict[str, Any]:
         _set_cached(cache_key, fallback_payload)
         return fallback_payload
 
+    prior_good_tokens = {
+        t["slug"]: t
+        for t in (_last_good_live.get("payload") or {}).get("tokens", [])
+        if not t.get("is_synthetic")
+    }
+    newly_observed_tokens = []
+
     for item in tokens_config:
         addr = item["token_address"].lower()
         token_pairs = [
@@ -715,12 +851,25 @@ async def fetch_trending_dex_tokens() -> Dict[str, Any]:
                 age_days = max(1, int((now_ts * 1000 - created_at_ms) / (86400 * 1000)))
             else:
                 age_days = None
+            token_is_stale = False
+            token_is_synthetic = False
+        elif item["slug"] in prior_good_tokens:
+            prev = prior_good_tokens[item["slug"]]
+            liq = prev["liquidity_usd"]
+            vol = prev["volume_24h_usd"]
+            mom = prev["momentum_24h_pct"]
+            age_days = prev.get("pool_age_days")
+            dex_name = prev.get("dex", "Aerodrome / Base")
+            token_is_stale = True
+            token_is_synthetic = False
         else:
             liq = item["fallback"]["liquidity_usd"]
             vol = item["fallback"]["volume_24h_usd"]
             mom = item["fallback"]["momentum_24h_pct"]
             age_days = None
             dex_name = "Aerodrome / Base"
+            token_is_stale = True
+            token_is_synthetic = True
 
         liq_class = (
             "DEEP_LIQUIDITY"
@@ -728,7 +877,7 @@ async def fetch_trending_dex_tokens() -> Dict[str, Any]:
             else ("MODERATE_LIQUIDITY" if liq >= 100000.0 else "LOW_LIQUIDITY")
         )
 
-        fetched_tokens.append({
+        token_entry = {
             "slug": item["slug"],
             "asset_name": item["asset_name"],
             "asset_symbol": item["asset_symbol"],
@@ -742,15 +891,21 @@ async def fetch_trending_dex_tokens() -> Dict[str, Any]:
             "pool_age_days": age_days,
             "liquidity_class": liq_class,
             "dex": dex_name,
-            "is_stale": False,
-        })
+            "is_stale": token_is_stale,
+        }
+        if token_is_synthetic:
+            token_entry["is_synthetic"] = True
+        fetched_tokens.append(token_entry)
+        if chosen_pair or item["slug"] in prior_good_tokens:
+            newly_observed_tokens.append(token_entry)
 
     fetched_iso = now_dt.isoformat()
-    _last_good_live["payload"] = {
-        "tokens": fetched_tokens,
-        "data_as_of": fetched_iso,
-        "_fetched_ts": now_ts,
-    }
+    if len(newly_observed_tokens) == len(tokens_config):
+        _last_good_live["payload"] = {
+            "tokens": newly_observed_tokens,
+            "data_as_of": fetched_iso,
+            "_fetched_ts": now_ts,
+        }
     cache_payload = {
         "tokens": fetched_tokens,
         "data_as_of": fetched_iso,
