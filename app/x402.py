@@ -225,6 +225,38 @@ async def verify_base_usdc_transaction(
                 f"Unable to verify block confirmations via RPC: {exc}",
             )
 
+    # P2: Check transaction freshness (prevent historical transfer scraping)
+    max_tx_age_seconds = int(getattr(settings, "MAX_TX_AGE_SECONDS", 900))
+    raw_tx_block = receipt.get("blockNumber")
+    if raw_tx_block and max_tx_age_seconds > 0 and not settings.TESTING:
+        try:
+            block_call = {
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "eth_getBlockByNumber",
+                "params": [raw_tx_block, False],
+            }
+            if http_client is not None:
+                blk_resp = await http_client.post(endpoint_rpc, json=block_call, timeout=5.0)
+            else:
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    blk_resp = await client.post(endpoint_rpc, json=block_call)
+            blk_resp.raise_for_status()
+            blk_data = blk_resp.json()
+            if blk_data and blk_data.get("result"):
+                block_ts = int(blk_data["result"].get("timestamp", "0x0"), 16)
+                if block_ts > 0:
+                    import time
+                    age_seconds = time.time() - block_ts
+                    if age_seconds > max_tx_age_seconds:
+                        return (
+                            False,
+                            "",
+                            f"EXPIRED_TRANSACTION: On-chain transfer is {int(age_seconds)}s old (max allowed: {max_tx_age_seconds}s / 15 mins).",
+                        )
+        except Exception as exc:
+            logger.warning("Block timestamp age check failed: %s", exc)
+
     expected_units = to_micro_usdc(expected_amount_usdc)
     padded_recipient = "0x" + target_wallet.replace("0x", "").rjust(64, "0")
 

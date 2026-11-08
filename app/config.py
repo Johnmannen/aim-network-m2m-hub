@@ -93,6 +93,9 @@ class Settings:
     PRO_PASS_MAX_CALLS: int = 50
     PRO_PASS_DURATION_HOURS: int = 24
 
+    # On-Chain Payment Verification Security (P2: Max Transaction Age < 15 minutes)
+    MAX_TX_AGE_SECONDS: int = int(os.getenv("MAX_TX_AGE_SECONDS", "900"))
+
     # First-Time Buyer Welcome Bonus (Sybil-resistant on-chain onboarding reward)
     WELCOME_BONUS_ENABLED: bool = (
         os.getenv("WELCOME_BONUS_ENABLED", "true").lower() == "true"

@@ -285,11 +285,13 @@ async def well_known_agent_card(request: Request) -> Response:
     if request.method == "HEAD":
         return Response(status_code=200, media_type="application/json")
     return JSONResponse({
-        "$schema": "https://agent2agent.ai/schemas/agent-card.json",
+        "$schema": "https://a2a-protocol.org/schemas/agent-card.json",
         "name": "AIM Network M2M Hub",
         "description": "Autonomous quantitative market data, Base L2 DEX whale radar, and orderflow analytics payable via HTTP 402 (x402) on Base.",
         "version": settings.VERSION,
         "url": "https://johngarp.click",
+        "defaultInputModes": ["application/json"],
+        "defaultOutputModes": ["application/json"],
         "tags": [
             "financial-data",
             "crypto-market-intelligence",
@@ -317,7 +319,7 @@ async def well_known_agent_card(request: Request) -> Response:
             "mcp": {
                 "supported": True,
                 "endpoint": "https://johngarp.click/mcp",
-                "protocol_version": "2024-11-05",
+                "protocol_version": "2025-03-26",
             },
             "payment": {
                 "protocol": "x402",
@@ -337,7 +339,7 @@ async def well_known_agent_card(request: Request) -> Response:
                 "url": "https://johngarp.click/api/v1/free-teaser",
                 "cost_usdc": 0.0,
                 "tags": ["free", "teaser", "btc", "latency-benchmark"],
-                "inputModes": ["direct", "mcp"],
+                "inputModes": ["application/json"],
                 "outputModes": ["application/json"],
             },
             {
@@ -347,7 +349,7 @@ async def well_known_agent_card(request: Request) -> Response:
                 "url": "https://johngarp.click/api/v1/crypto-pulse",
                 "cost_usdc": 0.01,
                 "tags": ["crypto", "spot", "volatility", "sentiment"],
-                "inputModes": ["direct", "mcp"],
+                "inputModes": ["application/json"],
                 "outputModes": ["application/json"],
             },
             {
@@ -357,7 +359,7 @@ async def well_known_agent_card(request: Request) -> Response:
                 "url": "https://johngarp.click/api/v1/base-dex-radar",
                 "cost_usdc": 0.05,
                 "tags": ["dex", "base-l2", "whales", "liquidity-pools"],
-                "inputModes": ["direct", "mcp"],
+                "inputModes": ["application/json"],
                 "outputModes": ["application/json"],
             },
             {
@@ -367,7 +369,7 @@ async def well_known_agent_card(request: Request) -> Response:
                 "url": "https://johngarp.click/api/v1/deep-market-report",
                 "cost_usdc": 1.00,
                 "tags": ["quantitative", "institutional", "signals", "alpha"],
-                "inputModes": ["direct", "mcp"],
+                "inputModes": ["application/json"],
                 "outputModes": ["application/json"],
             },
             {
@@ -377,7 +379,7 @@ async def well_known_agent_card(request: Request) -> Response:
                 "url": "https://johngarp.click/api/v1/trending",
                 "cost_usdc": 0.0,
                 "tags": ["free", "momentum", "trending", "discovery"],
-                "inputModes": ["direct", "mcp"],
+                "inputModes": ["application/json"],
                 "outputModes": ["application/json"],
             },
         ],
@@ -731,9 +733,11 @@ async def terms_of_service(request: Request):
         "operator": {
             "legal_entity": "AIM Network Operations",
             "representative": "John Garp",
+            "registration": "SE-Sole-Proprietorship / Innehar F-skatt (John Garp)",
             "jurisdiction": "Stockholm, Sweden (European Union)",
             "contact": "ops@johngarp.click",
             "support": "support@johngarp.click",
+            "tax_and_accounting_policy": "Reverse-charge / B2B crypto micropayments accounting per Swedish Tax Agency (Skatteverket) guidelines.",
         },
         "governing_law": "Laws of Sweden and European Union regulations. Exclusive forum: Stockholm District Court (Stockholms tingsrätt).",
         "service_model": "Autonomous machine-payable API feeds payable via HTTP 402 (x402) on Base Mainnet (Chain ID 8453).",
@@ -754,7 +758,8 @@ async def terms_of_service(request: Request):
         html_body = f"""
         <div class="meta">Last Updated: {data['updated_at']} &bull; Operator: {data['operator']['legal_entity']} &bull; Jurisdiction: {data['operator']['jurisdiction']}</div>
         <h2>1. Operator & Governing Law</h2>
-        <p>The AIM Network M2M Hub is operated by <strong>{data['operator']['legal_entity']}</strong> (represented by {data['operator']['representative']}), located in {data['operator']['jurisdiction']}. These terms and all platform usage are governed exclusively by the <strong>{data['governing_law']}</strong>.</p>
+        <p>The AIM Network M2M Hub is operated by <strong>{data['operator']['legal_entity']}</strong> (represented by {data['operator']['representative']}, {data['operator']['registration']}), located in {data['operator']['jurisdiction']}. These terms and all platform usage are governed exclusively by the <strong>{data['governing_law']}</strong>.</p>
+        <p><strong>Accounting & VAT:</strong> {data['operator']['tax_and_accounting_policy']}</p>
         <h2>2. Service Model & Machine Payments</h2>
         <p>{data['service_model']} Endpoints may be consumed per-call in USDC via cryptographic authorizations (EIP-3009) or 24-hour non-custodial VIP passes.</p>
         <h2>3. Financial Disclaimer & Algorithmic Scope</h2>
@@ -786,6 +791,8 @@ async def privacy_policy(request: Request):
         "updated_at": "2026-11-08",
         "data_controller": {
             "name": "AIM Network Operations",
+            "representative": "John Garp",
+            "registration": "SE-Sole-Proprietorship / Innehar F-skatt (John Garp)",
             "dpo_contact": "privacy@johngarp.click",
             "address": "Stockholm, Sweden (European Union)",
         },
