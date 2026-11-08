@@ -854,4 +854,59 @@ def test_ab3_synthetic_scout_description_indicates_feed_pending(tmp_path):
     assert "pending live market trade" in wasted["description"]
 
 
+def test_ac1_observed_ts_not_leaked_in_paid_responses(tmp_path, monkeypatch):
+    """AC1: _observed_ts is internal bookkeeping and must not be leaked in top-level paid payloads."""
+    import app.services.market_data as md
+    from app.main import create_app
+    from fastapi.testclient import TestClient
+
+    async def _mock_pulse(**kwargs):
+        return {
+            "timestamp": "2026-11-08T18:00:00Z",
+            "tier": "dynamic_scout_0.05_usdc",
+            "source_status": "coingecko_live",
+            "_observed_ts": 1794123456.0,
+            "asset": {"slug": "wasted", "name": "WASTED", "symbol": "WASTED"},
+            "meta": {"sources": ["coingecko_live"], "as_of": "2026-11-08T18:00:00Z", "data_age_seconds": 0, "is_stale": False, "fallback_reason": None, "disclaimer": "test", "status": "LIVE"},
+        }
+
+    monkeypatch.setattr(md, "fetch_dynamic_asset_pulse", _mock_pulse)
+
+    db_file = str(tmp_path / "test_ac1.db")
+    with TestClient(create_app(db_path=db_file)) as client:
+        r_paid = client.get("/api/v1/trending/wasted", headers={"X-PAYMENT-PROOF": "test_tx_ac1_probe_001"})
+        assert r_paid.status_code == 200
+        assert "_observed_ts" not in r_paid.json()
+
+
+def test_ac2_scout_sample_meta_keys_match_paid_response(tmp_path):
+    """AC2: scout sample meta has exact key parity with paid scout response."""
+    from app.main import create_app
+    from fastapi.testclient import TestClient
+
+    db_file = str(tmp_path / "test_ac2.db")
+    with TestClient(create_app(db_path=db_file)) as client:
+        r_scout = client.get("/api/v1/trending/wasted?sample=true")
+        assert r_scout.status_code == 200
+        meta_keys = set(r_scout.json()["payload"]["meta"].keys())
+        assert meta_keys == {
+            "as_of", "data_age_seconds", "disclaimer", "fallback_reason",
+            "is_stale", "sources", "status",
+        }
+        assert "source" not in meta_keys
+
+
+def test_ac3_wasted_endpoint_bootstrapped_on_startup(tmp_path):
+    """AC3: previously announced scout slug 'wasted' survives DB reset and never returns 404."""
+    from app.main import create_app
+    from fastapi.testclient import TestClient
+
+    db_file = str(tmp_path / "test_ac3_empty.db")
+    with TestClient(create_app(db_path=db_file)) as client:
+        resp = client.get("/api/v1/trending/wasted")
+        assert resp.status_code in (402, 503)
+        assert resp.status_code != 404
+
+
+
 

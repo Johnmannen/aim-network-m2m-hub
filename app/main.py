@@ -41,23 +41,33 @@ async def _autopilot_scout_loop(db_path: str | None) -> None:
 
 
 def _bootstrap_canonical_endpoints(db_path: str | None) -> None:
-    """Y5: register code-defined trending slugs so links and telemetry survive DB resets."""
+    """Y5/AC3: register canonical trending and persistent scout slugs so links and telemetry survive DB resets."""
     from app.database import register_dynamic_endpoint
     from app.services.market_data import CANONICAL_TRENDING_ENDPOINTS
 
-    for asset in CANONICAL_TRENDING_ENDPOINTS:
+    bootstrap_targets = list(CANONICAL_TRENDING_ENDPOINTS) + [
+        {
+            "slug": "wasted",
+            "asset_name": "WASTED",
+            "asset_symbol": "WASTED",
+            "coingecko_id": "wasted-2",
+            "price_usdc": 0.05,
+        }
+    ]
+
+    for asset in bootstrap_targets:
         try:
             register_dynamic_endpoint(
                 slug=asset["slug"],
                 asset_name=asset["asset_name"],
                 asset_symbol=asset["asset_symbol"],
-                coingecko_id=asset["slug"],
+                coingecko_id=asset.get("coingecko_id", asset["slug"]),
                 price_usdc=asset["price_usdc"],
                 db_path=db_path,
             )
         except Exception as exc:
             logger.warning(
-                "Canonical endpoint bootstrap failed for %s: %s", asset["slug"], exc
+                "Endpoint bootstrap failed for %s: %s", asset["slug"], exc
             )
 
 

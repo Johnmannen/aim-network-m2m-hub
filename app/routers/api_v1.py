@@ -336,7 +336,7 @@ async def get_base_dex_radar(request: Request):
     if payment_check:
         return payment_check
 
-    return radar
+    return {k: v for k, v in radar.items() if k != "_observed_ts"}
 
 
 @router.api_route(
@@ -590,7 +590,6 @@ async def get_dynamic_trending_endpoint(slug: str, request: Request):
                 },
                 "meta": {
                     "sources": ["schema_template"],
-                    "source": "schema_template",
                     "as_of": "2026-01-01T00:00:00Z",
                     "data_age_seconds": 0,
                     "is_stale": False,
@@ -719,4 +718,4 @@ async def get_dynamic_trending_endpoint(slug: str, request: Request):
                 "disclaimer": "Informational quantitative market data only. Not financial, trading, or investment advice.",
             },
         }
-    return dynamic_pulse
+    return {k: v for k, v in dynamic_pulse.items() if k != "_observed_ts"}
