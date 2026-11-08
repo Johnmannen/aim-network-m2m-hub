@@ -159,3 +159,14 @@ def test_cors_exposes_payment_headers(tmp_path):
     )
     assert r.status_code == 200
     assert "x-payment" in r.headers["access-control-allow-headers"].lower()
+
+
+def test_standard_x402_production_mode_does_not_crash_on_undefined_names(tmp_path, facilitator, monkeypatch):
+    monkeypatch.setattr(settings, "TESTING", False)
+    r = _client(tmp_path).get(URL, headers={"X-PAYMENT": _header()})
+    assert r.status_code == 200
+    assert "x-payment-response" in r.headers
+    stats = get_stats(str(tmp_path / "x.db"))
+    assert stats["calls_micro"] == 1
+    assert stats["total_calls"] == 1
+

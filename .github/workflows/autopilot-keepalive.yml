@@ -41,19 +41,10 @@ jobs:
     if: github.event_name != 'push'
     runs-on: ubuntu-latest
     steps:
-      - name: Ping Health & Sync Cloud Backup Gist
-        env:
-          GIST_PAT: ${{ secrets.GIST_BACKUP_TOKEN }}
-          GIST_ID: ${{ secrets.BACKUP_GIST_ID }}
-          SCOUT_TOKEN: ${{ secrets['SCOUT_SECRET_TOKEN'] }}
+      - name: Ping Endpoints (Keep-Alive)
         run: |
           echo "Pinging AIM Network on johngarp.click..."
           curl -fsS -A "aim-keepalive" --max-time 25 "https://johngarp.click/health"
           echo ""
           curl -fsS -A "aim-keepalive" --max-time 25 "https://johngarp.click/llms.txt" > /dev/null
           curl -fsS -A "aim-keepalive" --max-time 25 "https://johngarp.click/agents.json" > /dev/null
-          if [ -n "$GIST_PAT" ] && [ -n "$GIST_ID" ] && [ -n "$SCOUT_TOKEN" ]; then
-            if curl -fsS -A "aim-keepalive" --max-time 25 -H "X-Scout-Token: $SCOUT_TOKEN" "https://johngarp.click/api/admin/backup-snapshot" -o snapshot.json; then
-              python3 -c "import json, os, urllib.request; snap=open('snapshot.json','r',encoding='utf-8').read(); d=json.loads(snap); has_data=(len(d.get('used_transactions',[]))>0 or len(d.get('traffic_logs',[]))>0); req=urllib.request.Request('https://api.github.com/gists/'+os.environ['GIST_ID'], data=json.dumps({'files':{'aim_network_backup.json':{'content':snap}}}).encode('utf-8'), headers={'Authorization':'Bearer '+os.environ['GIST_PAT'],'Accept':'application/vnd.github+json','User-Agent':'aim-network-backup','Content-Type':'application/json'}, method='PATCH'); urllib.request.urlopen(req, timeout=15) if has_data else None" || true
-            fi
-          fi

@@ -237,6 +237,7 @@ def get_stats(db_path: Optional[str] = None) -> Dict[str, Any]:
         return {
             "status": state_row["status"],
             "paused": bool(state_row["paused"]),
+            "total_calls": int(state_row["calls_micro"] or 0) + int(state_row["calls_premium"] or 0),
             "calls_micro": state_row["calls_micro"],
             "calls_premium": state_row["calls_premium"],
             "revenue_usdc": round(float(state_row["revenue_usdc"]), 4),
@@ -502,12 +503,15 @@ def create_vip_pass(
         now_dt + timedelta(hours=settings.VIP_PASS_DURATION_HOURS)
     ).isoformat()
     clean_amount = float(Decimal(str(amount_usdc)))
+    is_pro = clean_amount >= 10.0 or str(tier).lower() in ("pro", "premium_pro")
+    pass_tier = "pro" if is_pro else "micro"
+    max_quota = settings.PRO_PASS_MAX_CALLS if is_pro else settings.VIP_PASS_MAX_CALLS
 
     record_paid_call(
         tx_hash=normalized,
         endpoint="/api/v1/vip-24h-pass",
         amount_usdc=clean_amount,
-        tier=tier,
+        tier=pass_tier,
         payer_address=payer_address,
         verified_mode=verified_mode,
         db_path=db_path,
@@ -524,7 +528,7 @@ def create_vip_pass(
                 normalized,
                 payer_address,
                 clean_amount,
-                settings.VIP_PASS_MAX_CALLS,
+                max_quota,
                 expires_iso,
                 now_iso,
             ),

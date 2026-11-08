@@ -506,17 +506,13 @@ async def mcp_server_endpoint(request: Request) -> Response:
 
             # 2. initialize handshake
             if method == "initialize":
-                client_proto = (
-                    params.get("protocolVersion")
-                    if isinstance(params, dict) and params.get("protocolVersion")
-                    else "2025-03-26"
-                )
+                server_proto = "2025-03-26"
                 return JSONResponse(
                     {
                         "jsonrpc": "2.0",
                         "id": rpc_id,
                         "result": {
-                            "protocolVersion": client_proto,
+                            "protocolVersion": server_proto,
                             "capabilities": {
                                 "tools": {"listChanged": False},
                             },

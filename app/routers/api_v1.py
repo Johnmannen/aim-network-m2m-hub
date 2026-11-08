@@ -14,6 +14,7 @@ from app.services.market_data import (
     fetch_crypto_pulse_data,
     fetch_deep_market_report,
     fetch_dynamic_asset_pulse,
+    fetch_trending_dex_tokens,
 )
 from app.x402 import require_x402_payment
 
@@ -114,49 +115,21 @@ async def list_trending_tokens(request: Request):
     stats = get_stats(db_override)
     dynamic_eps = stats.get("dynamic_endpoints", [])
 
-    tokens = []
-    # Seed canonical Base trending momentum assets tracked by Scout
+    trending_feed = await fetch_trending_dex_tokens()
+    canonical_seed = trending_feed.get("tokens", [])
+    data_as_of = trending_feed.get("data_as_of", datetime.now(timezone.utc).isoformat())
+    data_age_seconds = trending_feed.get("data_age_seconds", 0)
+    source_status = trending_feed.get("source", "dexscreener_base_live")
     now_iso = datetime.now(timezone.utc).isoformat()
-    canonical_seed = [
-        {
-            "slug": "morpho",
-            "asset_name": "Morpho",
-            "asset_symbol": "MORPHO",
-            "endpoint_path": "/api/v1/trending/morpho",
-            "price_usdc": 0.05,
-            "sample_url": "/api/v1/trending/morpho?sample=true",
-            "description": "Base L2 lending market liquidity and interest rate orderflow for Morpho",
-            "liquidity_usd": 521266.08,
-            "volume_24h_usd": 178158.79,
-            "momentum_24h_pct": -1.38,
-            "pool_age_days": 245,
-            "liquidity_class": "DEEP_LIQUIDITY",
-            "dex": "Aerodrome / Base",
-            "data_as_of": now_iso,
-            "data_age_seconds": 60,
-        },
-        {
-            "slug": "virtual",
-            "asset_name": "Virtual Protocol",
-            "asset_symbol": "VIRTUAL",
-            "endpoint_path": "/api/v1/trending/virtual",
-            "price_usdc": 0.05,
-            "sample_url": "/api/v1/trending/virtual?sample=true",
-            "description": "AI agent co-ownership token liquidity & whale volume on Base",
-            "liquidity_usd": 876945.45,
-            "volume_24h_usd": 1084492.09,
-            "momentum_24h_pct": -0.49,
-            "pool_age_days": 140,
-            "liquidity_class": "DEEP_LIQUIDITY",
-            "dex": "Aerodrome / Base",
-            "data_as_of": now_iso,
-            "data_age_seconds": 60,
-        },
-    ]
 
+    tokens = []
     seen_slugs = set()
     for item in canonical_seed:
-        tokens.append(item)
+        tokens.append({
+            **item,
+            "data_as_of": data_as_of,
+            "data_age_seconds": data_age_seconds,
+        })
         seen_slugs.add(item["slug"])
 
     for ep in dynamic_eps:
@@ -181,8 +154,8 @@ async def list_trending_tokens(request: Request):
                 "pool_age_days": 42,
                 "liquidity_class": "MODERATE_LIQUIDITY",
                 "dex": "Aerodrome / Base",
-                "data_as_of": now_iso,
-                "data_age_seconds": 60,
+                "data_as_of": data_as_of,
+                "data_age_seconds": data_age_seconds,
             })
             seen_slugs.add(s)
 
@@ -191,9 +164,11 @@ async def list_trending_tokens(request: Request):
         "count": len(tokens),
         "network": "base-mainnet",
         "timestamp": now_iso,
+        "data_as_of": data_as_of,
+        "data_age_seconds": data_age_seconds,
         "trending_assets": tokens,
         "meta": {
-            "source": "dexscreener_base_l2_verified",
+            "source": source_status,
             "liquidity_classification_standard": "DEEP_LIQUIDITY (liq > $500k & 24h vol > $100k), MODERATE_LIQUIDITY (liq > $100k), LOW_LIQUIDITY (liq < $100k)",
             "momentum_metric": "24-hour price change percentage on primary DEX pool via DexScreener",
             "pool_age_metric": "Days elapsed since primary liquidity pair deployment on Base L2",

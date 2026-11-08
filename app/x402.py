@@ -359,8 +359,6 @@ async def require_x402_payment(
                 request.state.bonus_tx_hash = tx
         except ValueError:
             logger.error("Settled x402 tx %s was already recorded; serving anyway.", tx)
-        if not settings.TESTING:
-            asyncio.create_task(push_to_cloud_gist(db_path=db_path))
         request.state.x402_receipt = x402_standard.encode_receipt(tx, network, payer)
         return None
 
