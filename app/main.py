@@ -207,6 +207,14 @@ def create_app(db_path: str | None = None) -> FastAPI:
         if receipt:
             response.headers["X-PAYMENT-RESPONSE"] = receipt
             response.headers["PAYMENT-RESPONSE"] = receipt
+
+        if getattr(request.state, "welcome_bonus_unlocked", False):
+            bonus_tx = getattr(request.state, "bonus_tx_hash", "")
+            response.headers["X-Welcome-Bonus"] = (
+                f"{settings.WELCOME_BONUS_CALLS}-free-calls-unlocked"
+            )
+            response.headers["X-Bonus-Proof"] = bonus_tx
+
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "SAMEORIGIN"
         return response
@@ -223,7 +231,13 @@ def create_app(db_path: str | None = None) -> FastAPI:
             "X-Admin-Pin",
             "X-Scout-Token",
         ],
-        expose_headers=["X-PAYMENT-RESPONSE", "PAYMENT-RESPONSE", "PAYMENT-REQUIRED"],
+        expose_headers=[
+            "X-PAYMENT-RESPONSE",
+            "PAYMENT-RESPONSE",
+            "PAYMENT-REQUIRED",
+            "X-Welcome-Bonus",
+            "X-Bonus-Proof",
+        ],
     )
 
     app.include_router(dashboard_router)

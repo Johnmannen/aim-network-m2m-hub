@@ -24,6 +24,8 @@ from app.database import (
     check_and_use_vip_pass,
     create_vip_pass,
     get_stats,
+    grant_welcome_bonus_pass,
+    is_first_time_buyer,
     record_paid_call,
 )
 from app.services.cloud_backup import push_to_cloud_gist
@@ -314,6 +316,16 @@ async def require_x402_payment(
                 verified_mode="x402_facilitator",
                 db_path=db_path,
             )
+            if settings.WELCOME_BONUS_ENABLED and is_first_time_buyer(payer, db_path=db_path):
+                grant_welcome_bonus_pass(
+                    tx_hash=tx,
+                    payer_address=payer,
+                    bonus_calls=settings.WELCOME_BONUS_CALLS,
+                    duration_hours=settings.WELCOME_BONUS_DURATION_HOURS,
+                    db_path=db_path,
+                )
+                request.state.welcome_bonus_unlocked = True
+                request.state.bonus_tx_hash = tx
         except ValueError:
             logger.error("Settled x402 tx %s was already recorded; serving anyway.", tx)
         if not settings.TESTING:
@@ -344,6 +356,7 @@ async def require_x402_payment(
                 error_message="Invalid test payment proof token.",
             )
         verified_label = "hybrid_sandbox"
+        payer_address = f"0x_test_{payment_proof.lower()}"
         if payment_proof.lower().startswith("test_vip_"):
             try:
                 create_vip_pass(
@@ -412,6 +425,16 @@ async def require_x402_payment(
             verified_mode=verified_label,
             db_path=db_path,
         )
+        if settings.WELCOME_BONUS_ENABLED and is_first_time_buyer(payer_address, db_path=db_path):
+            grant_welcome_bonus_pass(
+                tx_hash=payment_proof,
+                payer_address=payer_address,
+                bonus_calls=settings.WELCOME_BONUS_CALLS,
+                duration_hours=settings.WELCOME_BONUS_DURATION_HOURS,
+                db_path=db_path,
+            )
+            request.state.welcome_bonus_unlocked = True
+            request.state.bonus_tx_hash = payment_proof
         if not settings.TESTING:
             asyncio.create_task(push_to_cloud_gist(db_path=db_path))
     except ValueError:

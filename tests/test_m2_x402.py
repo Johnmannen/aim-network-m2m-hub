@@ -55,8 +55,9 @@ def test_missing_payment_returns_402_spec(tmp_path: Path):
     )
 
 
-def test_valid_payment_and_replay_rejection(tmp_path: Path):
-    """Valid proof unlocks endpoint and records revenue; reusing same proof is rejected with 402."""
+def test_valid_payment_and_replay_rejection(tmp_path: Path, monkeypatch):
+    """Valid proof unlocks endpoint and records revenue; reusing same proof is rejected with 402 when bonus disabled."""
+    monkeypatch.setattr(settings, "WELCOME_BONUS_ENABLED", False)
     db_file = str(tmp_path / "test_m2_replay.db")
     init_db(db_file)
     client = TestClient(create_test_app(db_file))
@@ -132,4 +133,30 @@ async def test_onchain_base_rpc_receipt_verification(monkeypatch):
     assert is_valid is True
     assert payer == "0x" + "1" * 40
     assert "Verified" in reason
+
+
+def test_first_time_buyer_welcome_bonus(tmp_path: Path):
+    """Verify first-time buyers get 5 free bonus calls by reusing their original tx_hash."""
+    from app.main import create_app
+    from fastapi.testclient import TestClient
+
+    db_file = str(tmp_path / "test_welcome_bonus.db")
+    app = create_app(db_path=db_file)
+    client = TestClient(app)
+
+    # First purchase with a unique test transaction
+    tx_first = "test_tx_first_buyer_999"
+    r1 = client.get("/api/v1/crypto-pulse", headers={"X-PAYMENT-PROOF": tx_first})
+    assert r1.status_code == 200
+    assert r1.headers.get("X-Welcome-Bonus") == "5-free-calls-unlocked"
+    assert r1.headers.get("X-Bonus-Proof") == tx_first
+
+    # Calls 2 through 6 reuse the same tx_first as bonus calls
+    for i in range(5):
+        r_bonus = client.get("/api/v1/crypto-pulse", headers={"X-PAYMENT-PROOF": tx_first})
+        assert r_bonus.status_code == 200, f"Bonus call {i+1} failed"
+
+    # Call 7 (quota exhausted) -> 402 Payment Required
+    r_exhausted = client.get("/api/v1/crypto-pulse", headers={"X-PAYMENT-PROOF": tx_first})
+    assert r_exhausted.status_code == 402
 

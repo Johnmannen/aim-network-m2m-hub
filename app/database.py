@@ -530,6 +530,64 @@ def create_vip_pass(
         return dict(row)
 
 
+def is_first_time_buyer(payer_address: str, db_path: Optional[str] = None) -> bool:
+    """Check if this is the very first purchase recorded for this payer address."""
+    if not payer_address or payer_address.lower() in ("unknown", ""):
+        return False
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        row = conn.execute(
+            "SELECT count(*) as count FROM used_transactions WHERE lower(payer_address) = ?;",
+            (payer_address.lower().strip(),),
+        ).fetchone()
+        return bool(row and int(row["count"]) == 1)
+
+
+def grant_welcome_bonus_pass(
+    tx_hash: str,
+    payer_address: str,
+    bonus_calls: int = 5,
+    duration_hours: int = 24,
+    db_path: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    Sybil-resistant onboarding reward:
+    Grants a first-time buyer a Welcome Bonus VIP Pass for `bonus_calls` free calls
+    across all endpoints over the next `duration_hours` using the same transaction hash.
+    """
+    init_db(db_path)
+    normalized = tx_hash.strip().lower()
+    now_dt = datetime.now(timezone.utc)
+    now_iso = now_dt.isoformat()
+    expires_iso = (now_dt + timedelta(hours=duration_hours)).isoformat()
+
+    with get_connection(db_path) as conn:
+        existing = conn.execute(
+            "SELECT * FROM vip_passes WHERE tx_hash = ?;", (normalized,)
+        ).fetchone()
+        if existing:
+            return None
+        conn.execute(
+            """
+            INSERT INTO vip_passes
+            (tx_hash, payer_address, amount_usdc, calls_used, max_calls, expires_at, created_at)
+            VALUES (?, ?, 0.0, 1, ?, ?, ?);
+            """,
+            (
+                normalized,
+                payer_address.lower().strip(),
+                1 + bonus_calls,
+                expires_iso,
+                now_iso,
+            ),
+        )
+        conn.commit()
+        row = conn.execute(
+            "SELECT * FROM vip_passes WHERE tx_hash = ?;", (normalized,)
+        ).fetchone()
+        return dict(row)
+
+
 def classify_user_agent(user_agent: str) -> str:
     """Classify visitor into human-readable AI Bot / SDK / Crawler / Browser category."""
     ua = (user_agent or "").lower()

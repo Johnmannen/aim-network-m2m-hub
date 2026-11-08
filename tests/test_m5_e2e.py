@@ -78,7 +78,10 @@ def test_full_end_to_end_system(tmp_path: Path):
         )
         assert r_paid_prem.status_code == 200
 
-        # Replay of used tx_hash is blocked
+        # Replay of first-time buyer tx consumes 5 bonus calls, then gets blocked with 402
+        for _ in range(5):
+            assert client.get("/api/v1/crypto-pulse", headers={"X-PAYMENT-PROOF": "test_tx_e2e_micro_001"}).status_code == 200
+
         r_replay = client.get(
             "/api/v1/crypto-pulse",
             headers={"X-PAYMENT-PROOF": "test_tx_e2e_micro_001"},
@@ -89,7 +92,7 @@ def test_full_end_to_end_system(tmp_path: Path):
         r_stats = client.get("/api/admin/stats", headers={"X-Admin-Pin": settings.ADMIN_PIN})
         assert r_stats.status_code == 200
         stats_data = r_stats.json()
-        assert stats_data["calls_micro"] == 1
+        assert stats_data["calls_micro"] == 6  # 1 initial paid + 5 welcome bonus calls
         assert stats_data["calls_premium"] == 1
         assert stats_data["revenue_usdc"] == 1.01
 

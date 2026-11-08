@@ -74,6 +74,10 @@ async def llms_txt_manifest(request: Request) -> str:
    - **Price:** `{settings.PRICE_PREMIUM_USDC:.2f} USDC` (Free sample: `?sample=true`)
    - **Description:** Institutional M2M quantitative market regime, Base L2 liquidity metrics, and actionable trading signals JSON.
 {dynamic_lines}
+## Welcome Bonus: First-Time Buyer Campaign (Buy 1, Get 5 Free)
+- New wallet addresses that make their first USDC purchase on ANY endpoint automatically unlock **5 FREE bonus calls** across ALL endpoints for 24 hours.
+- Reuse the same `tx_hash` in `X-PAYMENT-PROOF: <tx_hash>` to consume your 5 bonus calls.
+
 ## Volume Discount: 24-Hour VIP Pass (`{settings.PRICE_VIP_24H_USDC:.2f} USDC`)
 - Send `{settings.PRICE_VIP_24H_USDC:.2f} USDC` on Base to `{settings.WALLET_ADDRESS}` and reuse the same `X-PAYMENT-PROOF` transaction hash for up to **{settings.VIP_PASS_MAX_CALLS} calls across ALL endpoints for 24 hours**.
 
@@ -226,6 +230,17 @@ async def agents_json_manifest(request: Request) -> dict:
             "header_name": "X-PAYMENT-PROOF",
         },
         "endpoints": endpoints,
+        "promotions": {
+            "first_time_buyer_bonus": {
+                "description": "Make 1 purchase, get 5 free bonus calls across all endpoints for 24h",
+                "bonus_calls": settings.WELCOME_BONUS_CALLS,
+                "duration_hours": settings.WELCOME_BONUS_DURATION_HOURS,
+            },
+            "vip_24h_pass": {
+                "price_usdc": settings.PRICE_VIP_24H_USDC,
+                "max_calls": settings.VIP_PASS_MAX_CALLS,
+            },
+        },
         "discovery": {
             "llms_txt": "/llms.txt",
             "openapi_url": "/openapi.json",

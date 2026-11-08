@@ -89,6 +89,15 @@ class Settings:
     VIP_PASS_MAX_CALLS: int = 1000
     VIP_PASS_DURATION_HOURS: int = 24
 
+    # First-Time Buyer Welcome Bonus (Sybil-resistant on-chain onboarding reward)
+    WELCOME_BONUS_ENABLED: bool = (
+        os.getenv("WELCOME_BONUS_ENABLED", "true").lower() == "true"
+    )
+    WELCOME_BONUS_CALLS: int = int(os.getenv("WELCOME_BONUS_CALLS", "5"))
+    WELCOME_BONUS_DURATION_HOURS: int = int(
+        os.getenv("WELCOME_BONUS_DURATION_HOURS", "24")
+    )
+
     # Autonomous Scout Auto-Pilot interval in seconds (default: every 3600s = 1 hour)
     SCOUT_INTERVAL_SECONDS: int = int(os.getenv("SCOUT_INTERVAL_SECONDS", "3600"))
     SCOUT_AUTOPILOT_ENABLED: bool = (
