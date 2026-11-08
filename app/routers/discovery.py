@@ -8,6 +8,7 @@ Self-Marketing & AI Agent Discovery Router:
 
 import json
 import secrets
+from decimal import Decimal
 from typing import Any, Optional
 from fastapi import APIRouter, Header, HTTPException, Request
 from fastapi.responses import JSONResponse, PlainTextResponse, Response

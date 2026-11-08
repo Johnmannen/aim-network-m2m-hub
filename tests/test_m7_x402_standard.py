@@ -1,4 +1,4 @@
-﻿"""Standard x402 (EIP-3009 via facilitator) compatibility tests with a mocked facilitator."""
+"""Standard x402 (EIP-3009 via facilitator) compatibility tests with a mocked facilitator."""
 
 import base64
 import json

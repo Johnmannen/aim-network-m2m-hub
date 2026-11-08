@@ -162,7 +162,8 @@ async def test_cloud_gist_push_and_restore_roundtrip(tmp_path, monkeypatch):
             return self._data
 
     async def mock_patch(self, url, headers=None, json=None):
-        stored_gist["files"] = json["files"]
+        if json is not None:
+            stored_gist["files"] = json["files"]
         return MockGistResp(200, stored_gist)
 
     async def mock_get(self, url, headers=None):
