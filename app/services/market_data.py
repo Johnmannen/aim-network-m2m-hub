@@ -513,14 +513,20 @@ async def fetch_trending_dex_tokens() -> Dict[str, Any]:
     now_ts = now_dt.timestamp()
 
     if cached:
+        is_stale = cached.get("is_stale", False)
         fetched_at_ts = cached.get("_fetched_ts")
-        age_seconds = max(0, int(now_ts - fetched_at_ts)) if fetched_at_ts else None
+        age_seconds = (
+            None
+            if is_stale
+            else (max(0, int(now_ts - fetched_at_ts)) if fetched_at_ts else None)
+        )
         return {
             "tokens": cached["tokens"],
-            "data_as_of": cached["data_as_of"],
+            "data_as_of": cached.get("data_as_of"),
             "data_age_seconds": age_seconds,
             "source": cached.get("source", "dexscreener_base_live"),
-            "is_stale": cached.get("is_stale", False),
+            "is_stale": is_stale,
+            "fallback_reason": cached.get("fallback_reason"),
         }
 
     tokens_config = [
@@ -567,9 +573,8 @@ async def fetch_trending_dex_tokens() -> Dict[str, Any]:
     addrs_str = ",".join(t["token_address"] for t in tokens_config)
     url = f"https://api.dexscreener.com/latest/dex/tokens/{addrs_str}"
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "en-US,en;q=0.9",
+        "User-Agent": "AIMNetwork-M2M/1.1 (https://johngarp.click; ops@johngarp.click)",
+        "Accept": "application/json",
     }
 
     try:

@@ -206,9 +206,19 @@ async def vip_pass_status_or_quote(
         from app.database import get_vip_pass
         pass_data = get_vip_pass(proof, db_path=db_override)
         if pass_data:
+            now_dt = datetime.now(timezone.utc)
+            expires_dt = datetime.fromisoformat(pass_data["expires_at"])
+            is_expired = now_dt >= expires_dt
             remaining = max(0, pass_data["max_calls"] - pass_data["calls_used"])
+            if is_expired:
+                status_label = "expired"
+            elif remaining <= 0:
+                status_label = "exhausted"
+            else:
+                status_label = "active"
             return JSONResponse({
-                "status": "active" if remaining > 0 else "exhausted",
+                "status": status_label,
+                "is_expired": is_expired,
                 "calls_remaining": remaining,
                 "vip_pass": pass_data,
             })

@@ -389,4 +389,65 @@ async def test_require_x402_payment_pro_pass_flow(monkeypatch, tmp_path: Path):
     assert pass_record["calls_used"] == 1
 
 
+@pytest.mark.anyio
+async def test_trending_dex_tokens_cache_preserves_fallback_and_null_age(monkeypatch):
+    """W1: Ensure cache hit for stale/fallback DexScreener preserves fallback_reason and data_age_seconds: None."""
+    import time
+    from app.services.market_data import fetch_trending_dex_tokens, _set_cached
+
+    # Simulate cached stale data
+    now_ts = time.time()
+    mock_payload = {
+        "tokens": [{"slug": "morpho", "asset_name": "Morpho"}],
+        "data_as_of": None,
+        "data_age_seconds": None,
+        "_fetched_ts": now_ts - 5,
+        "source": "static_seed",
+        "is_stale": True,
+        "fallback_reason": "DexScreener HTTP 429",
+    }
+    _set_cached("trending_dex_tokens", mock_payload)
+
+    # First call (from cache)
+    cached_res = await fetch_trending_dex_tokens()
+    assert cached_res["is_stale"] is True
+    assert cached_res["source"] == "static_seed"
+    assert cached_res["data_as_of"] is None
+    assert cached_res["data_age_seconds"] is None
+    assert cached_res["fallback_reason"] == "DexScreener HTTP 429"
+
+
+def test_vip_pass_endpoint_expiry_status(tmp_path: Path):
+    """W3: Ensure /api/v1/vip-pass returns status: 'expired' when pass expires_at is in the past."""
+    from app.main import create_app
+    from app.database import create_vip_pass, get_connection
+    from fastapi.testclient import TestClient
+    from datetime import datetime, timezone, timedelta
+
+    db_file = str(tmp_path / "test_vip_expiry.db")
+    app = create_app(db_path=db_file)
+    client = TestClient(app)
+
+    # Create a pass and manually set expires_at in the past
+    tx_hash = "test_vip_expired_tx_001"
+    create_vip_pass(
+        tx_hash=tx_hash,
+        amount_usdc=2.0,
+        payer_address="0x_expired_user",
+        tier="micro",
+        db_path=db_file,
+    )
+    past_iso = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    with get_connection(db_file) as conn:
+        conn.execute("UPDATE vip_passes SET expires_at = ? WHERE tx_hash = ?;", (past_iso, tx_hash))
+        conn.commit()
+
+    resp = client.get(f"/api/v1/vip-pass?tx_hash={tx_hash}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "expired"
+    assert data["is_expired"] is True
+
+
+
 

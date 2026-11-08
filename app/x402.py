@@ -87,13 +87,6 @@ def build_402_response(
             "amount": price_str,
             "recipient": settings.WALLET_ADDRESS,
             "description": description,
-            "vip_24h_pass_option": {
-                "amount": f"{settings.PRICE_VIP_24H_DEC:.2f}",
-                "description": (
-                    f"Pay {settings.PRICE_VIP_24H_DEC:.2f} USDC once to unlock a 24-hour Micro VIP Pass "
-                    f"({settings.VIP_PASS_MAX_CALLS} calls across micro feeds ($0.01-$0.05) using the same tx_hash)."
-                ),
-            },
             "vip_24h_pass_options": {
                 "micro_pass": {
                     "price_usdc": f"{settings.PRICE_VIP_24H_DEC:.2f}",

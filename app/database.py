@@ -509,7 +509,7 @@ def create_vip_pass(
     db_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Create a 24h VIP Pass (up to 1,000 calls across all endpoints) and record initial revenue.
+    Create a 24h VIP Pass (500 calls for Micro, 50 calls for Pro) and record initial revenue.
     Raises ValueError if tx_hash was already redeemed.
     """
     init_db(db_path)

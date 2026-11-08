@@ -157,7 +157,7 @@ def test_full_end_to_end_system(tmp_path: Path):
         r_dex_402 = client.get("/api/v1/base-dex-radar")
         assert r_dex_402.status_code == 402
         assert "free_live_teaser" in r_dex_402.json()
-        assert "vip_24h_pass_option" in r_dex_402.json()["payment_details"]
+        assert "vip_24h_pass_options" in r_dex_402.json()["payment_details"]
 
         vip_headers = {"X-PAYMENT-PROOF": "test_vip_pass_multi_use_001"}
         r_vip_1 = client.get("/api/v1/base-dex-radar", headers=vip_headers)
