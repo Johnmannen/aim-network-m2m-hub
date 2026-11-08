@@ -813,10 +813,6 @@ async def fetch_trending_dex_tokens() -> Dict[str, Any]:
                 }
         source_label = "static_seed"
         for item in tokens_config:
-            fb = item["fallback"]
-            liq = fb["liquidity_usd"]
-            vol = fb["volume_24h_usd"]
-            liq_class = "DEEP_LIQUIDITY" if (liq >= 500000.0 and vol >= 100000.0) else "MODERATE_LIQUIDITY"
             fetched_tokens.append({
                 "slug": item["slug"],
                 "asset_name": item["asset_name"],
@@ -825,13 +821,14 @@ async def fetch_trending_dex_tokens() -> Dict[str, Any]:
                 "price_usdc": item["price_usdc"],
                 "sample_url": f"{item['endpoint_path']}?sample=true",
                 "description": item["description"],
-                "liquidity_usd": liq,
-                "volume_24h_usd": vol,
-                "momentum_24h_pct": fb["momentum_24h_pct"],
-                "pool_age_days": fb["pool_age_days"],
-                "liquidity_class": liq_class,
-                "dex": fb["dex"],
+                "liquidity_usd": None,
+                "volume_24h_usd": None,
+                "momentum_24h_pct": None,
+                "pool_age_days": None,
+                "liquidity_class": None,
+                "dex": None,
                 "is_stale": True,
+                "is_synthetic": True,
                 "data_as_of": None,
                 "data_age_seconds": None,
             })

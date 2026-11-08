@@ -140,9 +140,9 @@ async def list_trending_tokens(request: Request):
         s = ep["slug"].lower()
         if s not in seen_slugs:
             desc = (
-                f"Live orderflow & sentiment for {ep['asset_name']}"
-                if ep["asset_name"].upper() == ep["asset_symbol"].upper()
-                else f"Live orderflow & sentiment for {ep['asset_name']} ({ep['asset_symbol']})"
+                f"Trending asset profile for {ep['asset_name']} ({ep['asset_symbol']}) - orderflow feed pending live market trade"
+                if ep["asset_name"].upper() != ep["asset_symbol"].upper()
+                else f"Trending asset profile for {ep['asset_name']} - orderflow feed pending live market trade"
             )
             tokens.append({
                 "slug": ep["slug"],
@@ -543,33 +543,63 @@ async def get_dynamic_trending_endpoint(slug: str, request: Request):
     if _is_sample_request(request):
         if request.method == "HEAD":
             return Response(status_code=200, media_type="application/json")
-        sample_payload = {
-            "timestamp": "2026-01-01T00:00:00Z",
-            "tier": "dynamic_scout_0.05_usdc",
-            "source_status": "SCHEMA_TEMPLATE_PREVIEW",
-            "asset": {
-                "slug": clean_slug,
-                "name": matched["asset_name"],
-                "symbol": matched["asset_symbol"].upper(),
-                "coingecko_id": matched["coingecko_id"],
-                "price_usd": 0.0,
-                "change_24h_pct": 0.0,
-                "volume_24h_usd": 0.0,
-                "momentum_signal": "SAMPLE_FLOW",
-                "is_stale": False,
-                "is_synthetic": False,
-            },
-            "meta": {
-                "sources": ["schema_template"],
-                "as_of": "2026-01-01T00:00:00Z",
-                "data_age_seconds": 0,
-                "is_stale": False,
-                "fallback_reason": None,
-                "status": "SCHEMA_TEMPLATE_ONLY",
-                "disclaimer": f"Structure template only. Live {matched['asset_symbol']} orderflow unlocked via {float(price_dec):.2f} USDC x402 payment.",
-            },
-            "cache_hit": False,
-        }
+        if canonical_match:
+            sample_payload = {
+                "timestamp": "2026-01-01T00:00:00Z",
+                "tier": "dynamic_trending_0.05_usdc",
+                "source_status": "SCHEMA_TEMPLATE_PREVIEW",
+                "asset": {
+                    "slug": clean_slug,
+                    "name": canonical_match["asset_name"],
+                    "symbol": canonical_match["asset_symbol"],
+                    "liquidity_usd": 0.0,
+                    "volume_24h_usd": 0.0,
+                    "momentum_24h_pct": 0.0,
+                    "dex": "Aerodrome / Base",
+                    "liquidity_class": "DEEP_LIQUIDITY",
+                    "pool_age_days": None,
+                    "is_stale": False,
+                    "is_synthetic": False,
+                },
+                "meta": {
+                    "source": "schema_template",
+                    "as_of": "2026-01-01T00:00:00Z",
+                    "data_age_seconds": 0,
+                    "is_stale": False,
+                    "fallback_reason": None,
+                    "disclaimer": "Informational quantitative market data only. Not financial, trading, or investment advice.",
+                },
+                "cache_hit": False,
+            }
+        else:
+            sample_payload = {
+                "timestamp": "2026-01-01T00:00:00Z",
+                "tier": "dynamic_scout_0.05_usdc",
+                "source_status": "SCHEMA_TEMPLATE_PREVIEW",
+                "asset": {
+                    "slug": clean_slug,
+                    "name": matched["asset_name"],
+                    "symbol": matched["asset_symbol"].upper(),
+                    "coingecko_id": matched["coingecko_id"],
+                    "price_usd": 0.0,
+                    "change_24h_pct": 0.0,
+                    "volume_24h_usd": 0.0,
+                    "momentum_signal": "SAMPLE_FLOW",
+                    "is_stale": False,
+                    "is_synthetic": False,
+                },
+                "meta": {
+                    "sources": ["schema_template"],
+                    "source": "schema_template",
+                    "as_of": "2026-01-01T00:00:00Z",
+                    "data_age_seconds": 0,
+                    "is_stale": False,
+                    "fallback_reason": None,
+                    "status": "SCHEMA_TEMPLATE_ONLY",
+                    "disclaimer": f"Structure template only. Live {matched['asset_symbol']} orderflow unlocked via {float(price_dec):.2f} USDC x402 payment.",
+                },
+                "cache_hit": False,
+            }
         return {
             "status": "SAMPLE_DATA_VERIFIED",
             "sample_mode": True,

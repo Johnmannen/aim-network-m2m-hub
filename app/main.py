@@ -209,6 +209,11 @@ def create_app(db_path: str | None = None) -> FastAPI:
         try:
             full_path = request.url.path + (f"?{request.url.query}" if request.url.query else "")
             is_sample = request.query_params.get("sample", "").lower() in ("true", "1", "yes")
+            has_payment = bool(
+                request.headers.get("X-PAYMENT-PROOF")
+                or request.headers.get("X-PAYMENT")
+                or request.headers.get("PAYMENT-SIGNATURE")
+            )
             log_traffic_event(
                 path=full_path,
                 method=request.method,
@@ -218,6 +223,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 latency_ms=elapsed_ms,
                 has_admin_cookie=has_admin_cookie,
                 is_sample=is_sample,
+                payment_attempt=has_payment,
                 db_path=db_override,
             )
         except Exception as exc:

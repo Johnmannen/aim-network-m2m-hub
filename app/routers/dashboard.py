@@ -493,6 +493,9 @@ def _render_dashboard_html(request: Request) -> HTMLResponse:
         if cat == "PAID_200":
             badge_cls = "b-paid"
             badge_txt = f"💰 {ev['status_code']} BETALD"
+        elif cat == "PAYMENT_REJECTED":
+            badge_cls = "b-block"
+            badge_txt = f"⚠️ {ev['status_code']} BETALNING NEKAD"
         elif cat == "SAMPLE_200":
             badge_cls = "b-disc"
             badge_txt = f"🔬 {ev['status_code']} SCHEMA-PROV"

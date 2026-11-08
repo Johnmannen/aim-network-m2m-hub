@@ -748,3 +748,110 @@ def test_aa3_sample_payload_includes_staleness_and_synthetic_flags(tmp_path):
         assert "fallback_reason" in payload["meta"]
 
 
+def test_ab1_static_seed_has_null_metrics_and_synthetic_flag(monkeypatch):
+    """AB1: static_seed branch on cold start must set is_synthetic: True and null metrics."""
+    import asyncio
+    import app.services.market_data as md
+
+    class _Always429Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc_info):
+            return False
+
+        async def get(self, url):
+            return _FakeResponse(429, {})
+
+    async def _fast_sleep(_):
+        return None
+
+    md._cache_store.pop("trending_dex_tokens", None)
+    md._last_good_live.clear()
+    monkeypatch.setattr(md.httpx, "AsyncClient", _Always429Client)
+    monkeypatch.setattr(md.asyncio, "sleep", _fast_sleep)
+
+    res = asyncio.run(md.fetch_trending_dex_tokens())
+    assert res["source"] == "static_seed"
+    assert res["is_stale"] is True
+    for tok in res["tokens"]:
+        assert tok["is_synthetic"] is True
+        assert tok["liquidity_usd"] is None
+        assert tok["volume_24h_usd"] is None
+        assert tok["momentum_24h_pct"] is None
+        assert tok["pool_age_days"] is None
+        assert tok["liquidity_class"] is None
+        assert tok["dex"] is None
+
+    md._cache_store.pop("trending_dex_tokens", None)
+    md._last_good_live.clear()
+
+
+def test_ab2_sample_payload_has_exact_key_parity_with_paid_schema(tmp_path):
+    """AB2: canonical sample matches canonical paid keys; scout sample matches scout paid keys."""
+    from app.database import register_dynamic_endpoint
+    from app.main import create_app
+    from fastapi.testclient import TestClient
+
+    db_file = str(tmp_path / "test_ab2.db")
+    register_dynamic_endpoint(
+        slug="wasted",
+        asset_name="WASTED",
+        asset_symbol="WASTED",
+        coingecko_id="wasted-2",
+        price_usdc=0.05,
+        db_path=db_file,
+    )
+    client = TestClient(create_app(db_path=db_file))
+
+    # Canonical sample (DEX keys)
+    r_canon = client.get("/api/v1/trending/morpho?sample=true")
+    assert r_canon.status_code == 200
+    canon_keys = set(r_canon.json()["payload"]["asset"].keys())
+    expected_canon = {
+        "slug", "name", "symbol", "liquidity_usd", "volume_24h_usd",
+        "momentum_24h_pct", "dex", "liquidity_class", "pool_age_days",
+        "is_stale", "is_synthetic",
+    }
+    assert canon_keys == expected_canon
+    assert "source" in r_canon.json()["payload"]["meta"]
+
+    # Scout sample (CoinGecko keys)
+    r_scout = client.get("/api/v1/trending/wasted?sample=true")
+    assert r_scout.status_code == 200
+    scout_keys = set(r_scout.json()["payload"]["asset"].keys())
+    expected_scout = {
+        "slug", "name", "symbol", "coingecko_id", "price_usd",
+        "change_24h_pct", "volume_24h_usd", "momentum_signal",
+        "is_stale", "is_synthetic",
+    }
+    assert scout_keys == expected_scout
+
+
+def test_ab3_synthetic_scout_description_indicates_feed_pending(tmp_path):
+    """AB3: synthetic scout entries in /api/v1/trending must not claim live orderflow."""
+    from app.database import register_dynamic_endpoint
+    from app.main import create_app
+    from fastapi.testclient import TestClient
+
+    db_file = str(tmp_path / "test_ab3.db")
+    register_dynamic_endpoint(
+        slug="wasted",
+        asset_name="WASTED",
+        asset_symbol="WASTED",
+        coingecko_id="wasted-2",
+        price_usdc=0.05,
+        db_path=db_file,
+    )
+    client = TestClient(create_app(db_path=db_file))
+    resp = client.get("/api/v1/trending")
+    assert resp.status_code == 200
+    wasted = next(t for t in resp.json()["trending_assets"] if t["slug"] == "wasted")
+    assert "Live orderflow" not in wasted["description"]
+    assert "pending live market trade" in wasted["description"]
+
+
+

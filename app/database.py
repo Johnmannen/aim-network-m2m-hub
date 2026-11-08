@@ -224,6 +224,7 @@ def get_stats(db_path: Optional[str] = None) -> Dict[str, Any]:
         discovery_hits = int(funnel_map.get("DISCOVERY", 0)) + int(funnel_map.get("SAMPLE_200", 0))
         quotes_402 = int(funnel_map.get("QUOTE_402", 0))
         paid_200 = int(funnel_map.get("PAID_200", 0))
+        payment_rejected_hits = int(funnel_map.get("PAYMENT_REJECTED", 0))
         blocked_hits = int(funnel_map.get("BLOCKED", 0))
         scanner_hits = int(funnel_map.get("SCANNER", 0))
         total_external = int(avg_lat_row["total_req"] or 0)
@@ -251,6 +252,7 @@ def get_stats(db_path: Optional[str] = None) -> Dict[str, Any]:
                 "discovery_hits": discovery_hits,
                 "quotes_402": quotes_402,
                 "paid_200": paid_200,
+                "payment_rejected_hits": payment_rejected_hits,
                 "blocked_hits": blocked_hits,
                 "scanner_hits": scanner_hits,
                 "conversion_rate_pct": conversion_pct,
@@ -698,6 +700,7 @@ def log_traffic_event(
     latency_ms: float = 0.0,
     has_admin_cookie: bool = False,
     is_sample: bool = False,
+    payment_attempt: bool = False,
     db_path: Optional[str] = None,
 ) -> None:
     """Record an HTTP request into traffic_logs with automatic funnel categorization."""
@@ -728,7 +731,7 @@ def log_traffic_event(
     )
 
     if status_code == 402:
-        category = "QUOTE_402"
+        category = "PAYMENT_REJECTED" if payment_attempt else "QUOTE_402"
     elif is_scanner:
         category = "SCANNER"
     elif status_code in (401, 403, 429, 503):
