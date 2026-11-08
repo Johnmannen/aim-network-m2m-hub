@@ -90,7 +90,6 @@ class Settings:
     VIP_PASS_MAX_CALLS: int = 500
     VIP_PASS_DURATION_HOURS: int = 24
 
-    PRO_PASS_PRICE_USDC: float = float(PRO_PASS_PRICE_DEC)
     PRO_PASS_MAX_CALLS: int = 50
     PRO_PASS_DURATION_HOURS: int = 24
 

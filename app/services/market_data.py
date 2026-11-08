@@ -644,7 +644,8 @@ async def fetch_trending_dex_tokens() -> Dict[str, Any]:
             liq = round(float(chosen_pair.get("liquidity", {}).get("usd", 0.0) or 0.0), 2)
             vol = round(float(chosen_pair.get("volume", {}).get("h24", 0.0) or 0.0), 2)
             mom = round(float(chosen_pair.get("priceChange", {}).get("h24", 0.0) or 0.0), 2)
-            dex_id = chosen_pair.get("dexId", "aerodrome").capitalize()
+            raw_dex = (chosen_pair.get("dexId") or "aerodrome").lower()
+            dex_name = "Aerodrome / Base" if raw_dex in ("aero", "aerodrome") else f"{raw_dex.capitalize()} / Base"
             # V4: Use ONLY chosen pair's created timestamp; omit/null if not reported by this pool
             created_at_ms = chosen_pair.get("pairCreatedAt")
             if created_at_ms:
@@ -656,7 +657,7 @@ async def fetch_trending_dex_tokens() -> Dict[str, Any]:
             vol = item["fallback"]["volume_24h_usd"]
             mom = item["fallback"]["momentum_24h_pct"]
             age_days = None
-            dex_id = "Aerodrome"
+            dex_name = "Aerodrome / Base"
 
         liq_class = (
             "DEEP_LIQUIDITY"
@@ -677,7 +678,7 @@ async def fetch_trending_dex_tokens() -> Dict[str, Any]:
             "momentum_24h_pct": mom,
             "pool_age_days": age_days,
             "liquidity_class": liq_class,
-            "dex": f"{dex_id} / Base",
+            "dex": dex_name,
             "is_stale": False,
         })
 

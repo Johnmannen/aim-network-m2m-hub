@@ -398,7 +398,7 @@ async def test_trending_dex_tokens_cache_preserves_fallback_and_null_age(monkeyp
     # Simulate cached stale data
     now_ts = time.time()
     mock_payload = {
-        "tokens": [{"slug": "morpho", "asset_name": "Morpho"}],
+        "tokens": [{"slug": "morpho", "asset_name": "Morpho", "asset_symbol": "MORPHO"}],
         "data_as_of": None,
         "data_age_seconds": None,
         "_fetched_ts": now_ts - 5,
@@ -415,6 +415,10 @@ async def test_trending_dex_tokens_cache_preserves_fallback_and_null_age(monkeyp
     assert cached_res["data_as_of"] is None
     assert cached_res["data_age_seconds"] is None
     assert cached_res["fallback_reason"] == "DexScreener HTTP 429"
+
+    # Reset cache to avoid side-effects on subsequent tests
+    from app.services.market_data import _cache_store
+    _cache_store.pop("trending_dex_tokens", None)
 
 
 def test_vip_pass_endpoint_expiry_status(tmp_path: Path):

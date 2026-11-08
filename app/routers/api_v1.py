@@ -156,8 +156,8 @@ async def list_trending_tokens(request: Request):
                 "dex": "Aerodrome / Base",
                 "source": "autonomous_scout_seed",
                 "is_synthetic": True,
-                "data_as_of": data_as_of,
-                "data_age_seconds": data_age_seconds,
+                "data_as_of": None,
+                "data_age_seconds": None,
             })
             seen_slugs.add(s)
 
@@ -209,7 +209,7 @@ async def vip_pass_status_or_quote(
             now_dt = datetime.now(timezone.utc)
             expires_dt = datetime.fromisoformat(pass_data["expires_at"])
             is_expired = now_dt >= expires_dt
-            remaining = max(0, pass_data["max_calls"] - pass_data["calls_used"])
+            remaining = 0 if is_expired else max(0, pass_data["max_calls"] - pass_data["calls_used"])
             if is_expired:
                 status_label = "expired"
             elif remaining <= 0:
@@ -476,10 +476,27 @@ async def get_dynamic_trending_endpoint(slug: str, request: Request):
     db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
     stats = get_stats(db_override)
     clean_slug = slug.lower().strip()
-    matched = next(
-        (ep for ep in stats.get("dynamic_endpoints", []) if ep["slug"] == clean_slug),
+
+    trending_feed = await fetch_trending_dex_tokens()
+    canonical_match = next(
+        (t for t in trending_feed.get("tokens", []) if t["slug"] == clean_slug),
         None,
     )
+
+    if canonical_match:
+        matched = {
+            "slug": canonical_match["slug"],
+            "asset_name": canonical_match.get("asset_name") or canonical_match.get("name") or canonical_match["slug"].capitalize(),
+            "asset_symbol": canonical_match.get("asset_symbol") or canonical_match.get("symbol") or canonical_match["slug"].upper(),
+            "coingecko_id": canonical_match["slug"],
+            "price_usdc": canonical_match.get("price_usdc", float(settings.PRICE_DYNAMIC_DEC)),
+        }
+    else:
+        matched = next(
+            (ep for ep in stats.get("dynamic_endpoints", []) if ep["slug"] == clean_slug),
+            None,
+        )
+
     if not matched:
         raise HTTPException(
             status_code=404,
@@ -533,6 +550,29 @@ async def get_dynamic_trending_endpoint(slug: str, request: Request):
         return payment_check
 
     increment_dynamic_endpoint_stats(clean_slug, float(price_dec), db_override)
+    if canonical_match:
+        return {
+            "status": "ok",
+            "tier": "dynamic_trending_0.05_usdc",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "asset": {
+                "slug": clean_slug,
+                "name": canonical_match["asset_name"],
+                "symbol": canonical_match["asset_symbol"],
+                "liquidity_usd": canonical_match.get("liquidity_usd", 0.0),
+                "volume_24h_usd": canonical_match.get("volume_24h_usd", 0.0),
+                "momentum_24h_pct": canonical_match.get("momentum_24h_pct", 0.0),
+                "dex": canonical_match.get("dex", "Aerodrome / Base"),
+                "liquidity_class": canonical_match.get("liquidity_class", "DEEP_LIQUIDITY"),
+                "pool_age_days": canonical_match.get("pool_age_days"),
+            },
+            "meta": {
+                "source": trending_feed.get("source", "dexscreener_base_live"),
+                "as_of": trending_feed.get("data_as_of"),
+                "data_age_seconds": trending_feed.get("data_age_seconds"),
+                "disclaimer": "Informational quantitative market data only. Not financial, trading, or investment advice.",
+            },
+        }
     return await fetch_dynamic_asset_pulse(
         slug=clean_slug,
         asset_name=matched["asset_name"],

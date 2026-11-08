@@ -516,13 +516,14 @@ def create_vip_pass(
     normalized = tx_hash.strip().lower()
     now_dt = datetime.now(timezone.utc)
     now_iso = now_dt.isoformat()
-    expires_iso = (
-        now_dt + timedelta(hours=settings.VIP_PASS_DURATION_HOURS)
-    ).isoformat()
     clean_amount = float(Decimal(str(amount_usdc)))
     is_pro = clean_amount >= 10.0 or str(tier).lower() in ("pro", "premium_pro")
     pass_tier = "pro" if is_pro else "micro"
     max_quota = settings.PRO_PASS_MAX_CALLS if is_pro else settings.VIP_PASS_MAX_CALLS
+    duration_hours = settings.PRO_PASS_DURATION_HOURS if is_pro else settings.VIP_PASS_DURATION_HOURS
+    expires_iso = (
+        now_dt + timedelta(hours=duration_hours)
+    ).isoformat()
 
     record_paid_call(
         tx_hash=normalized,

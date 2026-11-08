@@ -103,3 +103,68 @@ def test_sample_mode_bypasses_x402_for_schema_preview(tmp_path: Path):
     assert pulse_op["x-payment-protocol"] == "x402"
     assert pulse_op["x-sample-url"] == "/api/v1/crypto-pulse?sample=true"
 
+
+def test_canonical_trending_endpoints_sample_and_paid(tmp_path: Path):
+    """X1: Verify canonical trending assets (morpho, virtual) respond to /trending/{slug} for both sample and paid calls."""
+    from app.main import create_app
+
+    db_file = str(tmp_path / "test_m3_trending_slugs.db")
+    app = create_app(db_path=db_file)
+    client = TestClient(app)
+
+    # 1. Sample verification mode (?sample=true)
+    r_morpho_sample = client.get("/api/v1/trending/morpho?sample=true")
+    assert r_morpho_sample.status_code == 200
+    assert r_morpho_sample.json()["sample_mode"] is True
+    assert r_morpho_sample.json()["payload"]["asset"]["symbol"] == "MORPHO"
+
+    r_virtual_sample = client.get("/api/v1/trending/virtual?sample=true")
+    assert r_virtual_sample.status_code == 200
+    assert r_virtual_sample.json()["sample_mode"] is True
+    assert r_virtual_sample.json()["payload"]["asset"]["symbol"] == "VIRTUAL"
+
+    # 2. Unpaid -> 402 Payment Required
+    r_unpaid = client.get("/api/v1/trending/morpho")
+    assert r_unpaid.status_code == 402
+    assert r_unpaid.json()["payment_details"]["amount"] == "0.05"
+
+    # 3. Paid with test token -> 200 OK
+    r_paid = client.get(
+        "/api/v1/trending/morpho",
+        headers={"X-PAYMENT-PROOF": "test_tx_morpho_paid_001"},
+    )
+    assert r_paid.status_code == 200
+    assert r_paid.json()["status"] == "ok"
+    assert r_paid.json()["asset"]["slug"] == "morpho"
+    assert r_paid.json()["asset"]["dex"] == "Aerodrome / Base"
+
+
+def test_synthetic_scout_seed_timestamp_isolation(tmp_path: Path):
+    """X2: Verify synthetic scout seeds in /api/v1/trending have data_as_of: null and data_age_seconds: null."""
+    from app.main import create_app
+    from app.database import register_dynamic_endpoint
+
+    db_file = str(tmp_path / "test_m3_synthetic.db")
+    app = create_app(db_path=db_file)
+    client = TestClient(app)
+
+    # Deploy a synthetic scout endpoint
+    register_dynamic_endpoint(
+        slug="wasted",
+        asset_name="WASTED",
+        asset_symbol="WASTED",
+        coingecko_id="wasted",
+        price_usdc=0.05,
+        db_path=db_file,
+    )
+
+    r = client.get("/api/v1/trending")
+    assert r.status_code == 200
+    assets = r.json().get("trending_assets", [])
+    wasted = next((a for a in assets if a["slug"] == "wasted"), None)
+    assert wasted is not None
+    assert wasted["is_synthetic"] is True
+    assert wasted["data_as_of"] is None
+    assert wasted["data_age_seconds"] is None
+
+
