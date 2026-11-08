@@ -45,7 +45,7 @@ jobs:
         env:
           GIST_PAT: ${{ secrets.GIST_BACKUP_TOKEN }}
           GIST_ID: ${{ secrets.BACKUP_GIST_ID }}
-          SCOUT_TOKEN: ${{ secrets.SCOUT_SECRET_TOKEN }}
+          SCOUT_TOKEN: ${{ secrets['SCOUT_SECRET_TOKEN'] }}
         run: |
           echo "Pinging AIM Network on johngarp.click..."
           curl -fsS -A "aim-keepalive" --max-time 25 "https://johngarp.click/health"
