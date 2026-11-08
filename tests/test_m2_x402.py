@@ -160,3 +160,94 @@ def test_first_time_buyer_welcome_bonus(tmp_path: Path):
     r_exhausted = client.get("/api/v1/crypto-pulse", headers={"X-PAYMENT-PROOF": tx_first})
     assert r_exhausted.status_code == 402
 
+
+@pytest.mark.anyio
+async def test_expired_transaction_rejected_by_max_age(monkeypatch):
+    """Transactions older than MAX_TX_AGE_SECONDS are rejected with EXPIRED_TRANSACTION."""
+    import time
+    from app.x402 import verify_base_usdc_transaction
+
+    tx_hash = "0x" + "9" * 64
+    block_number = "0x100"
+    # Old timestamp: 2 hours ago (> 900 seconds)
+    old_timestamp = hex(int(time.time() - 7200))
+
+    mock_receipt = {
+        "result": {
+            "status": "0x1",
+            "blockNumber": block_number,
+            "logs": [
+                {
+                    "address": settings.USDC_CONTRACT_ADDRESS.lower(),
+                    "topics": [
+                        ERC20_TRANSFER_TOPIC,
+                        "0x" + "1" * 64,
+                        "0x" + settings.WALLET_ADDRESS.lower().replace("0x", "").rjust(64, "0"),
+                    ],
+                    "data": hex(10000),
+                }
+            ],
+        }
+    }
+
+    mock_block = {
+        "result": {
+            "timestamp": old_timestamp,
+        }
+    }
+
+    class MockResponse:
+        def __init__(self, data):
+            self._data = data
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self._data
+
+    async def mock_post(self, url, json):
+        method = json.get("method")
+        if method == "eth_getTransactionReceipt":
+            return MockResponse(mock_receipt)
+        if method == "eth_getBlockByNumber":
+            return MockResponse(mock_block)
+        return MockResponse({})
+
+    monkeypatch.setattr("httpx.AsyncClient.post", mock_post)
+
+    is_valid, payer, reason = await verify_base_usdc_transaction(
+        tx_hash=tx_hash, expected_amount_usdc=0.01
+    )
+    assert is_valid is False
+    assert "EXPIRED_TRANSACTION" in reason
+
+
+def test_vip_pass_quota_pro_vs_micro(tmp_path: Path):
+    """Pro VIP pass (>=10 USDC) gets PRO_PASS_MAX_CALLS, Micro (<10 USDC) gets VIP_PASS_MAX_CALLS."""
+    from app.database import create_vip_pass, init_db
+
+    db_file = str(tmp_path / "test_vip_quota.db")
+    init_db(db_file)
+
+    micro_pass = create_vip_pass(
+        tx_hash="test_vip_micro_tx_001",
+        amount_usdc=2.0,
+        payer_address="0x_buyer_micro",
+        tier="micro",
+        db_path=db_file,
+    )
+    assert micro_pass["max_calls"] == settings.VIP_PASS_MAX_CALLS
+    assert micro_pass["amount_usdc"] == 2.0
+
+    pro_pass = create_vip_pass(
+        tx_hash="test_vip_pro_tx_002",
+        amount_usdc=10.0,
+        payer_address="0x_buyer_pro",
+        tier="pro",
+        db_path=db_file,
+    )
+    assert pro_pass["max_calls"] == settings.PRO_PASS_MAX_CALLS
+    assert pro_pass["amount_usdc"] == 10.0
+
+

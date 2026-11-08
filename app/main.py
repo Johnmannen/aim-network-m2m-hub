@@ -41,6 +41,7 @@ async def _autopilot_scout_loop(db_path: str | None) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    app.state.started_at = time.time()
     db_override = getattr(app.state, "db_path", None)
     init_db(db_override)
     app.state.http_client = httpx.AsyncClient(timeout=5.0)

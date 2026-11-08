@@ -227,7 +227,7 @@ async def verify_base_usdc_transaction(
     # P2: Check transaction freshness (prevent historical transfer scraping)
     max_tx_age_seconds = int(getattr(settings, "MAX_TX_AGE_SECONDS", 900))
     raw_tx_block = receipt.get("blockNumber")
-    if raw_tx_block and max_tx_age_seconds > 0 and not settings.TESTING:
+    if raw_tx_block and max_tx_age_seconds > 0:
         try:
             block_call = {
                 "jsonrpc": "2.0",

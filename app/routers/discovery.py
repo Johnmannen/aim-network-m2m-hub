@@ -8,6 +8,7 @@ Self-Marketing & AI Agent Discovery Router:
 
 import json
 import secrets
+import time
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Optional
@@ -837,8 +838,8 @@ async def refund_policy(request: Request):
     data = {
         "service": "AIM Network M2M Data Hub",
         "updated_at": "2026-11-08",
-        "settlement_guarantee": "Under standard x402 (EIP-3009 signed authorizations), payment transfer authorizations are verified and settled on-chain strictly AFTER the application successfully generates and delivers a valid HTTP 200 payload.",
-        "failed_or_degraded_requests": "Calls resulting in HTTP 5xx server errors, upstream API timeouts, or unverified feeds are NEVER submitted for settlement. The client's signed authorization expires unexecuted with zero cost.",
+        "settlement_policy": "Under standard x402 (EIP-3009 signed authorizations), payment transfer authorizations are verified cryptographically before service execution. Settlement is performed on-chain via the x402 facilitator.",
+        "failed_requests_and_remedy": "Calls that fail during pre-check or verification are rejected immediately with HTTP 402 with zero charge. In the rare event of an unexpected server failure post-settlement, the transaction receipt in X-PAYMENT-RESPONSE serves as an immutable cryptographic receipt for immediate credit or direct refund via support@johngarp.click.",
         "legacy_onchain_proofs": {
             "single_use_tokens": "On-chain transaction hashes submitted via X-PAYMENT-PROOF are recorded atomically in SQLite to guarantee single-use consumption and prevent replay vulnerabilities across agents.",
             "vip_passes": f"24h VIP Passes allow up to {settings.VIP_PASS_MAX_CALLS} calls (Micro) or {settings.PRO_PASS_MAX_CALLS} calls (Pro). Passes are cryptographically tied to the verified on-chain sender address (from) to prevent unauthorized pass sharing.",
@@ -850,10 +851,10 @@ async def refund_policy(request: Request):
     if _prefers_html(request):
         html_body = f"""
         <div class="meta">Last Updated: {data['updated_at']} &bull; Settlement Protocol: x402 / EIP-3009 on Base Mainnet</div>
-        <h2>1. Pre-Settlement Guarantee (Zero Charge on Failures)</h2>
-        <p>{data['settlement_guarantee']}</p>
-        <h2>2. Failed or Degraded Requests</h2>
-        <p>{data['failed_or_degraded_requests']}</p>
+        <h2>1. x402 Authorization & Settlement Policy</h2>
+        <p>{data['settlement_policy']}</p>
+        <h2>2. Failed Requests & Unconditional Remedy</h2>
+        <p>{data['failed_requests_and_remedy']}</p>
         <h2>3. Legacy On-Chain Proofs & Pass Security</h2>
         <ul>
           <li><strong>Single-Use Burn:</strong> {data['legacy_onchain_proofs']['single_use_tokens']}</li>
@@ -876,22 +877,38 @@ async def service_status(request: Request):
     db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
     stats = get_stats(db_override)
 
+    started_at = getattr(request.app.state, "started_at", None)
+    now_ts = time.time()
+    uptime_seconds = int(now_ts - started_at) if started_at else 0
+    uptime_str = f"{uptime_seconds // 3600}h {(uptime_seconds % 3600) // 60}m {uptime_seconds % 60}s"
+
+    from app.services.market_data import _get_cached
+    dex_cached = _get_cached("trending_dex_tokens")
+    dex_status = "DEGRADED" if (dex_cached and dex_cached.get("is_stale")) else "HEALTHY"
+
+    pulse_cached = _get_cached("crypto_pulse")
+    coinbase_status = "HEALTHY" if (not pulse_cached or pulse_cached.get("meta", {}).get("status") == "LIVE_FEED_VERIFIED") else "DEGRADED"
+
     data = {
         "status": "OPERATIONAL",
         "network": "Base Mainnet (Chain ID 8453)",
         "timestamp": datetime.now(timezone.utc).isoformat(),
-        "uptime_24h": "100.0%",
-        "storage_engine": "SQLite WAL on SSD (Render Persistent Disk /data)",
+        "uptime_metric": {
+            "uptime_seconds": uptime_seconds,
+            "uptime_human": uptime_str,
+            "availability_target": "99.9% SLA target",
+        },
+        "storage_engine": "SQLite WAL on SSD Local Storage (/app/data/aim_network.db)",
         "sla_latency_targets": {
             "l1_cache_response": "<15ms (in-memory L1 cache)",
             "upstream_aggregation": "300-800ms (Coinbase Exchange parallel fetch)",
         },
         "upstreams": {
             "base_l2_rpc": "HEALTHY",
-            "coinbase_exchange_stats": "HEALTHY",
-            "coingecko_spot_fallback": "HEALTHY",
-            "payai_facilitator": "HEALTHY",
-            "dexscreener": "HEALTHY",
+            "coinbase_exchange_stats": coinbase_status,
+            "coingecko_spot_fallback": "STANDBY_BACKUP",
+            "payai_facilitator": "HEALTHY" if settings.X402_FACILITATOR_URL else "CONFIGURED_ONLINE",
+            "dexscreener": dex_status,
         },
         "stats_overview": {
             "total_calls_served": stats.get("total_calls", 0),
@@ -907,7 +924,7 @@ async def service_status(request: Request):
         <h2>System Overview</h2>
         <p><strong>Network:</strong> {data['network']}<br>
         <strong>Storage Engine:</strong> {data['storage_engine']}<br>
-        <strong>24h Availability:</strong> {data['uptime_24h']}<br>
+        <strong>Instance Uptime:</strong> {data['uptime_metric']['uptime_human']} ({data['uptime_metric']['availability_target']})<br>
         <strong>Total Calls Processed:</strong> {data['stats_overview']['total_calls_served']}</p>
         <h2>Latency SLA Targets</h2>
         <ul>

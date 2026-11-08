@@ -57,8 +57,8 @@ async def get_free_teaser(request: Request):
                     "BTC": {
                         "price_usd": btc_price,
                         "change_24h_pct": pulse["assets"]["BTC"]["change_24h_pct"],
-                        "coinbase_volume_24h_usd": pulse["assets"]["BTC"].get("coinbase_volume_24h_usd", 148680149.0),
-                        "coinbase_volume_24h_btc": pulse["assets"]["BTC"].get("coinbase_volume_24h_btc", 1960.2),
+                        "coinbase_volume_24h_usd": pulse["assets"]["BTC"].get("coinbase_volume_24h_usd", 0.0),
+                        "coinbase_volume_24h_btc": pulse["assets"]["BTC"].get("coinbase_volume_24h_btc", 0.0),
                     }
                 },
                 "volatility_index": {
@@ -148,12 +148,14 @@ async def list_trending_tokens(request: Request):
                 "price_usdc": ep["price_usdc"],
                 "sample_url": f"{ep['endpoint_path']}?sample=true",
                 "description": desc,
-                "liquidity_usd": 124850.20,
-                "volume_24h_usd": 48900.50,
-                "momentum_24h_pct": 2.45,
-                "pool_age_days": 42,
+                "liquidity_usd": ep.get("liquidity_usd", 124850.20),
+                "volume_24h_usd": ep.get("volume_24h_usd", 48900.50),
+                "momentum_24h_pct": ep.get("momentum_24h_pct", 2.45),
+                "pool_age_days": ep.get("pool_age_days", 42),
                 "liquidity_class": "MODERATE_LIQUIDITY",
                 "dex": "Aerodrome / Base",
+                "source": "autonomous_scout_seed",
+                "is_synthetic": True,
                 "data_as_of": data_as_of,
                 "data_age_seconds": data_age_seconds,
             })

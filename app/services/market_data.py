@@ -499,7 +499,7 @@ async def fetch_base_dex_radar() -> Dict[str, Any]:
 async def fetch_trending_dex_tokens() -> Dict[str, Any]:
     """
     Fetch live Base DEX liquidity, 24h volume, and 24h momentum for canonical trending assets
-    via DexScreener API with a 60-second TTL cache.
+    via DexScreener Public API (single multi-token query) with a 60-second TTL cache.
     """
     cache_key = "trending_dex_tokens"
     cached = _get_cached(cache_key)
@@ -507,13 +507,14 @@ async def fetch_trending_dex_tokens() -> Dict[str, Any]:
     now_ts = now_dt.timestamp()
 
     if cached:
-        fetched_at_ts = cached.get("_fetched_ts", now_ts)
-        age_seconds = max(0, int(now_ts - fetched_at_ts))
+        fetched_at_ts = cached.get("_fetched_ts")
+        age_seconds = max(0, int(now_ts - fetched_at_ts)) if fetched_at_ts else None
         return {
             "tokens": cached["tokens"],
             "data_as_of": cached["data_as_of"],
             "data_age_seconds": age_seconds,
             "source": cached.get("source", "dexscreener_base_live"),
+            "is_stale": cached.get("is_stale", False),
         }
 
     tokens_config = [
@@ -553,65 +554,25 @@ async def fetch_trending_dex_tokens() -> Dict[str, Any]:
 
     fetched_tokens = []
     source_label = "dexscreener_base_live"
+    is_live = False
+    all_pairs = []
+
+    addrs_str = ",".join(t["token_address"] for t in tokens_config)
+    url = f"https://api.dexscreener.com/latest/dex/tokens/{addrs_str}"
+    headers = {"User-Agent": "AIMNetwork-M2M/1.1 (https://johngarp.click; ops@johngarp.click)"}
 
     try:
-        async with httpx.AsyncClient(timeout=4.0) as client:
-            for item in tokens_config:
-                addr = item["token_address"]
-                resp = await client.get(f"https://api.dexscreener.com/latest/dex/tokens/{addr}")
-                chosen_pair = None
-                if resp.status_code == 200:
-                    pairs = [
-                        p for p in resp.json().get("pairs", [])
-                        if p.get("chainId") == "base"
-                    ]
-                    if pairs:
-                        # Pick highest liquidity pair on Base
-                        pairs.sort(key=lambda x: float(x.get("liquidity", {}).get("usd", 0.0) or 0.0), reverse=True)
-                        chosen_pair = pairs[0]
-
-                if chosen_pair:
-                    liq = round(float(chosen_pair.get("liquidity", {}).get("usd", 0.0) or 0.0), 2)
-                    vol = round(float(chosen_pair.get("volume", {}).get("h24", 0.0) or 0.0), 2)
-                    mom = round(float(chosen_pair.get("priceChange", {}).get("h24", 0.0) or 0.0), 2)
-                    dex_id = chosen_pair.get("dexId", "aerodrome").capitalize()
-                    created_at_ms = chosen_pair.get("pairCreatedAt")
-                    if created_at_ms:
-                        age_days = max(1, int((now_ts * 1000 - created_at_ms) / (86400 * 1000)))
-                    else:
-                        age_days = item["fallback"]["pool_age_days"]
-                else:
-                    liq = item["fallback"]["liquidity_usd"]
-                    vol = item["fallback"]["volume_24h_usd"]
-                    mom = item["fallback"]["momentum_24h_pct"]
-                    age_days = item["fallback"]["pool_age_days"]
-                    dex_id = "Aerodrome"
-                    source_label = "dexscreener_cached_fallback"
-
-                liq_class = (
-                    "DEEP_LIQUIDITY"
-                    if (liq >= 500000.0 and vol >= 100000.0)
-                    else ("MODERATE_LIQUIDITY" if liq >= 100000.0 else "LOW_LIQUIDITY")
-                )
-
-                fetched_tokens.append({
-                    "slug": item["slug"],
-                    "asset_name": item["asset_name"],
-                    "asset_symbol": item["asset_symbol"],
-                    "endpoint_path": item["endpoint_path"],
-                    "price_usdc": item["price_usdc"],
-                    "sample_url": f"{item['endpoint_path']}?sample=true",
-                    "description": item["description"],
-                    "liquidity_usd": liq,
-                    "volume_24h_usd": vol,
-                    "momentum_24h_pct": mom,
-                    "pool_age_days": age_days,
-                    "liquidity_class": liq_class,
-                    "dex": f"{dex_id} / Base",
-                })
+        async with httpx.AsyncClient(timeout=6.0, headers=headers) as client:
+            resp = await client.get(url)
+            if resp.status_code == 200:
+                all_pairs = resp.json().get("pairs", [])
+                if all_pairs:
+                    is_live = True
     except Exception as exc:
-        logger.warning("DexScreener live trending fetch failed: %s", exc)
-        source_label = "dexscreener_cached_fallback"
+        logger.warning("DexScreener multi-token live fetch failed: %s", exc)
+
+    if not is_live:
+        source_label = "static_seed"
         for item in tokens_config:
             fb = item["fallback"]
             liq = fb["liquidity_usd"]
@@ -631,7 +592,66 @@ async def fetch_trending_dex_tokens() -> Dict[str, Any]:
                 "pool_age_days": fb["pool_age_days"],
                 "liquidity_class": liq_class,
                 "dex": fb["dex"],
+                "is_stale": True,
             })
+        return {
+            "tokens": fetched_tokens,
+            "data_as_of": None,
+            "data_age_seconds": None,
+            "source": source_label,
+            "is_stale": True,
+        }
+
+    for item in tokens_config:
+        addr = item["token_address"].lower()
+        token_pairs = [
+            p for p in all_pairs
+            if p.get("chainId") == "base" and p.get("baseToken", {}).get("address", "").lower() == addr
+        ]
+        chosen_pair = None
+        if token_pairs:
+            token_pairs.sort(key=lambda x: float(x.get("liquidity", {}).get("usd", 0.0) or 0.0), reverse=True)
+            chosen_pair = token_pairs[0]
+
+        if chosen_pair:
+            liq = round(float(chosen_pair.get("liquidity", {}).get("usd", 0.0) or 0.0), 2)
+            vol = round(float(chosen_pair.get("volume", {}).get("h24", 0.0) or 0.0), 2)
+            mom = round(float(chosen_pair.get("priceChange", {}).get("h24", 0.0) or 0.0), 2)
+            dex_id = chosen_pair.get("dexId", "aerodrome").capitalize()
+            created_at_ms = next((p.get("pairCreatedAt") for p in token_pairs if p.get("pairCreatedAt")), None)
+            if created_at_ms:
+                age_days = max(1, int((now_ts * 1000 - created_at_ms) / (86400 * 1000)))
+            else:
+                age_days = item["fallback"]["pool_age_days"]
+        else:
+            liq = item["fallback"]["liquidity_usd"]
+            vol = item["fallback"]["volume_24h_usd"]
+            mom = item["fallback"]["momentum_24h_pct"]
+            age_days = item["fallback"]["pool_age_days"]
+            dex_id = "Aerodrome"
+
+        liq_class = (
+            "DEEP_LIQUIDITY"
+            if (liq >= 500000.0 and vol >= 100000.0)
+            else ("MODERATE_LIQUIDITY" if liq >= 100000.0 else "LOW_LIQUIDITY")
+        )
+
+        fetched_tokens.append({
+            "slug": item["slug"],
+            "asset_name": item["asset_name"],
+            "asset_symbol": item["asset_symbol"],
+            "endpoint_path": item["endpoint_path"],
+            "price_usdc": item["price_usdc"],
+            "sample_url": f"{item['endpoint_path']}?sample=true",
+            "description": item["description"],
+            "liquidity_usd": liq,
+            "volume_24h_usd": vol,
+            "momentum_24h_pct": mom,
+            "pool_age_days": age_days,
+            "liquidity_class": liq_class,
+            "dex": f"{dex_id} / Base",
+            "is_stale": False,
+        })
 
     fetched_iso = now_dt.isoformat()
     cache_payload = {
@@ -639,6 +659,7 @@ async def fetch_trending_dex_tokens() -> Dict[str, Any]:
         "data_as_of": fetched_iso,
         "_fetched_ts": now_ts,
         "source": source_label,
+        "is_stale": False,
     }
     _set_cached(cache_key, cache_payload)
     return {
@@ -646,6 +667,7 @@ async def fetch_trending_dex_tokens() -> Dict[str, Any]:
         "data_as_of": fetched_iso,
         "data_age_seconds": 0,
         "source": source_label,
+        "is_stale": False,
     }
 
 

@@ -28,9 +28,5 @@ services:
         value: "3600"
       - key: BASE_RPC_URL
         value: "https://mainnet.base.org"
-      - key: BACKUP_GIST_ID
-        sync: false
-      - key: GITHUB_BACKUP_TOKEN
-        sync: false
       - key: X402_FACILITATOR_URL
         value: "https://facilitator.payai.network"

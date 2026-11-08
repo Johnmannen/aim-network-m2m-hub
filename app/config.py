@@ -111,7 +111,7 @@ class Settings:
         os.getenv("SCOUT_AUTOPILOT_ENABLED", "true").lower() == "true"
     )
 
-    # SQLite database path & Automatic Cloud Backup Gist (configured via env)
+    # SQLite database storage path (local SSD / persistent disk)
     DATABASE_PATH: str = os.getenv(
         "DATABASE_PATH", str(BASE_DIR / "data" / "aim_network.db")
     )

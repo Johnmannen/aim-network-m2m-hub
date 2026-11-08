@@ -268,11 +268,7 @@ async def get_backup_snapshot(
     x_admin_pin: Optional[str] = Header(default=None, alias="X-Admin-Pin"),
     x_scout_token: Optional[str] = Header(default=None, alias="X-Scout-Token"),
 ) -> dict:
-    """
-    Export non-sensitive SQLite telemetry & state snapshot so the GitHub Gist
-    cloud backup can persist traffic, discoveries, dynamic endpoints, and used tx hashes
-    across Render Free Tier container restarts. Protected by X-Scout-Token or X-Admin-Pin.
-    """
+    """Export sanitized SQLite snapshot (IPs and payer addresses are redacted). Protected by X-Scout-Token or X-Admin-Pin."""
     provided = (x_scout_token or x_admin_pin or "").strip()
     verify_admin_pin_with_lockout(request, provided, allow_scout_token=True)
     db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None

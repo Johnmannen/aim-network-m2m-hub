@@ -767,7 +767,9 @@ def export_db_snapshot(db_path: Optional[str] = None) -> Dict[str, Any]:
             "vip_passes": [
                 {**dict(r), "payer_address": "redacted"} for r in vip_rows
             ],
-            "traffic_logs": [dict(r) for r in reversed(traffic_rows)],
+            "traffic_logs": [
+                {**dict(r), "client_ip": "redacted"} for r in reversed(traffic_rows)
+            ],
         }
 
 
