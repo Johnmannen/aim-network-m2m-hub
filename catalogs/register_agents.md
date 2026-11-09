@@ -1,3 +1,4 @@
+<!-- cSpell:disable -->
 # AIM Network — Katalog- och Marknadsplatsregistrering
 
 Detta dokument beskriver hur AIM Network (`https://johngarp.click`) listas och

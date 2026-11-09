@@ -143,7 +143,6 @@ async def verify_base_usdc_transaction(
     recipient_wallet: Optional[str] = None,
     rpc_url: Optional[str] = None,
     http_client: Optional[httpx.AsyncClient] = None,
-    return_amount: Literal[False] = False,
 ) -> Tuple[bool, str, str]:
     ...
 
@@ -155,7 +154,20 @@ async def verify_base_usdc_transaction(
     recipient_wallet: Optional[str] = None,
     rpc_url: Optional[str] = None,
     http_client: Optional[httpx.AsyncClient] = None,
-    return_amount: Literal[True] = ...,
+    return_amount: Literal[False] = ...,
+) -> Tuple[bool, str, str]:
+    ...
+
+
+@overload
+async def verify_base_usdc_transaction(
+    tx_hash: str,
+    expected_amount_usdc: float | Decimal,
+    recipient_wallet: Optional[str] = None,
+    rpc_url: Optional[str] = None,
+    http_client: Optional[httpx.AsyncClient] = None,
+    *,
+    return_amount: Literal[True],
 ) -> Tuple[bool, str, str, float]:
     ...
 
