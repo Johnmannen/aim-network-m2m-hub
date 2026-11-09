@@ -359,9 +359,10 @@ async def test_onchain_block_confirmations_check(monkeypatch):
 
     settings.MIN_CONFIRMATIONS = 3
     try:
-        is_valid, _, reason = await verify_base_usdc_transaction(
+        res = await verify_base_usdc_transaction(
             tx_hash=tx_hash, expected_amount_usdc=0.01
         )
+        is_valid, _, reason = res[0], res[1], res[2]
         assert is_valid is False
         assert "Insufficient block confirmations" in reason
     finally:
@@ -416,9 +417,10 @@ async def test_onchain_block_confirmations_fail_closed_on_rpc_error(monkeypatch)
 
     settings.MIN_CONFIRMATIONS = 2
     try:
-        is_valid, _, reason = await verify_base_usdc_transaction(
+        res = await verify_base_usdc_transaction(
             tx_hash=tx_hash, expected_amount_usdc=0.01
         )
+        is_valid, _, reason = res[0], res[1], res[2]
         assert is_valid is False
         assert "Unable to verify block confirmations" in reason
     finally:

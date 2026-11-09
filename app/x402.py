@@ -14,7 +14,7 @@ import logging
 import re
 import time
 from decimal import Decimal, ROUND_HALF_UP
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Literal, Optional, Tuple, overload
 import httpx
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -133,6 +133,30 @@ def build_402_response(
             price_usdc, description, resource_url
         )
     return JSONResponse(status_code=status_code, headers=headers, content=content)
+
+
+@overload
+async def verify_base_usdc_transaction(
+    tx_hash: str,
+    expected_amount_usdc: float | Decimal,
+    recipient_wallet: Optional[str] = None,
+    rpc_url: Optional[str] = None,
+    http_client: Optional[httpx.AsyncClient] = None,
+    return_amount: Literal[False] = False,
+) -> Tuple[bool, str, str]:
+    ...
+
+
+@overload
+async def verify_base_usdc_transaction(
+    tx_hash: str,
+    expected_amount_usdc: float | Decimal,
+    recipient_wallet: Optional[str] = None,
+    rpc_url: Optional[str] = None,
+    http_client: Optional[httpx.AsyncClient] = None,
+    return_amount: Literal[True] = ...,
+) -> Tuple[bool, str, str, float]:
+    ...
 
 
 async def verify_base_usdc_transaction(
