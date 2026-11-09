@@ -1,14 +1,14 @@
 # 📋 AIM Network — Master-Åtgärdsplan & Intäktsstrategi (V2.1 Fast Track)
 ## Syntes av Konkurrensanalys, Gemini Deep Research & Verifierad Infrastruktur
 
-**Dokumentversion:** V2.1 (Fast Track — Infrastruktur Verifierad som Klar)  
+**Dokumentversion:** V2.2 (Pass 1 Driftsatt & Verifierad live, Infrastruktur Klar)  
 **Datum:** 2026-11-09  
 **Källunderlag:**
 1. `Konkurrensanalys AIM Network.md` (Intern revision, Base L2-nisch, proveniens, kvalitet).
 2. `Gemini Deep Research` (Marknadskartläggning över 78 267 endpoints, 2-centsregeln, 79 %-fällan).
 3. `Trafikanalys 2026-11-08` + Live Cloudflare & UptimeRobot-verifiering (9 nov 2026).
 **Tillämpade Skills:** `project-planner` & `writing-plans`  
-**Status:** Aktiv / Redo för Pass 1 (Kod & x402 v2)  
+**Status:** Pass 1 genomfört & driftsatt på Render! Nästa: Pass 2 (Skarp testbetalning) & Pass 3 (Katalogregistreringar)  
 
 ---
 
@@ -132,5 +132,8 @@ KVARVARANDE EXEKVERINGSPASS (FAST TRACK)
 - [x] Cloudflare AI Crawler & Agent Policies: Verifierat ALLOW
 - [x] UptimeRobot 5 min keepalive: Verifierat AKTIVT
 - [x] Master-Åtgärdsplan V2.1 genererad och sparad
-- [ ] John har gett klartecken för Pass 1 (Kod & x402 v2)
+- [x] Pass 1: Koduppgradering x402 v2, /api/catalog, prissänkning & telemetri (71/71 tester godkända)
+- [x] Pass 1: Git push & driftsatt live på https://johngarp.click (Verifierat: 200 OK på /api/catalog, 402 PAYMENT-REQUIRED på /api/v1/arb-scanner)
+- [ ] Pass 2: Skarp testbetalning på Base Mainnet (0.005 USDC)
+- [ ] Pass 3: Katalogregistrering i x402apis.io, relai.fi, 402.com.tr, Bazaar, x402scan, Glama
 ```
