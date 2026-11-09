@@ -180,3 +180,83 @@ def init_turso_schema() -> None:
     for sql in statements:
         execute_turso_sync(sql)
 
+
+def _parse_turso_value(val_obj: Dict[str, Any]) -> Any:
+    """Extract primitive Python value from Turso Hrana v2 value object."""
+    if not isinstance(val_obj, dict):
+        return val_obj
+    vtype = val_obj.get("type", "null")
+    if vtype == "null":
+        return None
+    if vtype == "integer":
+        return int(val_obj.get("value", 0))
+    if vtype == "float":
+        return float(val_obj.get("value", 0.0))
+    if vtype == "text":
+        return str(val_obj.get("value", ""))
+    if vtype == "blob":
+        import base64
+        return base64.b64decode(val_obj.get("base64", ""))
+    return val_obj.get("value")
+
+
+def hydrate_from_turso(db_path: Optional[str] = None) -> int:
+    """Download historical records from Turso into local SQLite if local DB is fresh."""
+    if not is_turso_enabled():
+        return 0
+    from app.database import get_connection
+
+    # Check if local traffic_logs already has data
+    with get_connection(db_path) as conn:
+        local_count = conn.execute("SELECT COUNT(*) as c FROM traffic_logs WHERE is_internal = 0;").fetchone()["c"]
+        if local_count >= 100:
+            return 0
+
+    res = execute_turso_sync(
+        "SELECT visitor_id, path, method, status_code, category, agent_type, country, latency_ms, is_internal, created_at FROM traffic_logs ORDER BY id DESC LIMIT 500;"
+    )
+    if not res:
+        return 0
+
+    try:
+        results = res.get("results", [])
+        if not results:
+            return 0
+        result = results[0].get("response", {}).get("result", {})
+        cols = [c["name"] for c in result.get("cols", [])]
+        rows = result.get("rows", [])
+        if not rows:
+            return 0
+
+        inserted = 0
+        with get_connection(db_path) as conn:
+            for r in rows:
+                row_dict = {cols[i]: _parse_turso_value(r[i]) for i in range(len(cols))}
+                conn.execute(
+                    """
+                    INSERT INTO traffic_logs
+                    (visitor_id, path, method, status_code, category, agent_type, country, latency_ms, is_internal, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                    """,
+                    (
+                        row_dict.get("visitor_id", ""),
+                        row_dict.get("path", ""),
+                        row_dict.get("method", "GET"),
+                        int(row_dict.get("status_code", 200)),
+                        row_dict.get("category", "OTHER"),
+                        row_dict.get("agent_type", "Bot"),
+                        row_dict.get("country", "GLOBAL"),
+                        float(row_dict.get("latency_ms", 0.0)),
+                        int(row_dict.get("is_internal", 0)),
+                        row_dict.get("created_at", ""),
+                    ),
+                )
+                inserted += 1
+            conn.commit()
+        logger.info("Hydrated %d traffic logs from Turso into local DB", inserted)
+        return inserted
+    except Exception as exc:
+        logger.warning("Hydration from Turso failed: %s", exc)
+        return 0
+
+

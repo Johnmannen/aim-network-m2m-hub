@@ -78,9 +78,10 @@ async def lifespan(app: FastAPI):
     db_override = getattr(app.state, "db_path", None)
     init_db(db_override)
     try:
-        from app.services.turso_sync import init_turso_schema, is_turso_enabled
+        from app.services.turso_sync import init_turso_schema, hydrate_from_turso, is_turso_enabled
         if is_turso_enabled():
             init_turso_schema()
+            hydrate_from_turso(db_override)
     except Exception as exc:
         logger.warning("Turso startup init error: %s", exc)
     _bootstrap_canonical_endpoints(db_override)
