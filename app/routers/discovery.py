@@ -656,18 +656,33 @@ def _build_mcp_tools() -> list[dict[str, Any]]:
             },
         },
         {
+            "name": "get_arb_scanner",
+            "description": f"Real-time Base L2 arbitrage, spread & momentum scanner (${settings.PRICE_MICRO_DEC:.3f} USDC via x402 on Base). Endpoint: https://johngarp.click/api/v1/arb-scanner",
+            "inputSchema": proof_schema,
+        },
+        {
             "name": "get_crypto_pulse",
-            "description": f"Real-time BTC, ETH, SOL prices, 24h volatility index, and Fear & Greed sentiment (${settings.PRICE_MICRO_USDC:.2f} USDC via x402 on Base). Endpoint: https://johngarp.click/api/v1/crypto-pulse",
+            "description": f"Real-time BTC, ETH, SOL prices, 24h volatility index, and Fear & Greed sentiment (${settings.PRICE_MICRO_DEC:.3f} USDC via x402 on Base). Endpoint: https://johngarp.click/api/v1/crypto-pulse",
+            "inputSchema": proof_schema,
+        },
+        {
+            "name": "get_sentiment_signals",
+            "description": f"Multi-source market sentiment, orderflow & action signals (${settings.PRICE_DEX_RADAR_DEC:.2f} USDC via x402 on Base). Endpoint: https://johngarp.click/api/v1/sentiment-signals",
             "inputSchema": proof_schema,
         },
         {
             "name": "get_base_dex_radar",
-            "description": f"Real-time Base L2 DEX liquidity pools, volume spikes, and whale inflow signals (${settings.PRICE_DEX_RADAR_USDC:.2f} USDC via x402 on Base). Endpoint: https://johngarp.click/api/v1/base-dex-radar",
+            "description": f"Real-time Base L2 DEX liquidity pools, volume spikes, and whale inflow signals (${settings.PRICE_DEX_RADAR_DEC:.2f} USDC via x402 on Base). Endpoint: https://johngarp.click/api/v1/base-dex-radar",
+            "inputSchema": proof_schema,
+        },
+        {
+            "name": "get_multi_source_dossier",
+            "description": f"Comprehensive multi-source intelligence report & decision dossier (${settings.PRICE_PREMIUM_DEC:.2f} USDC via x402 on Base). Endpoint: https://johngarp.click/api/v1/multi-source-dossier",
             "inputSchema": proof_schema,
         },
         {
             "name": "get_deep_market_report",
-            "description": f"Institutional M2M quantitative market regime, Base L2 liquidity metrics, and actionable trading signals (${settings.PRICE_PREMIUM_USDC:.2f} USDC via x402 on Base). Endpoint: https://johngarp.click/api/v1/deep-market-report",
+            "description": f"Institutional M2M quantitative market regime, Base L2 liquidity metrics, and actionable trading signals (${settings.PRICE_PREMIUM_DEC:.2f} USDC via x402 on Base). Endpoint: https://johngarp.click/api/v1/deep-market-report",
             "inputSchema": proof_schema,
         },
         {
@@ -805,9 +820,12 @@ async def mcp_server_endpoint(request: Request) -> Response:
 
                 # Paid tools return x402 payment instructions via MCP tool content
                 endpoint_map = {
-                    "get_crypto_pulse": ("/api/v1/crypto-pulse", settings.PRICE_MICRO_USDC),
-                    "get_base_dex_radar": ("/api/v1/base-dex-radar", settings.PRICE_DEX_RADAR_USDC),
-                    "get_deep_market_report": ("/api/v1/deep-market-report", settings.PRICE_PREMIUM_USDC),
+                    "get_arb_scanner": ("/api/v1/arb-scanner", float(settings.PRICE_MICRO_DEC)),
+                    "get_crypto_pulse": ("/api/v1/crypto-pulse", float(settings.PRICE_MICRO_DEC)),
+                    "get_sentiment_signals": ("/api/v1/sentiment-signals", float(settings.PRICE_DEX_RADAR_DEC)),
+                    "get_base_dex_radar": ("/api/v1/base-dex-radar", float(settings.PRICE_DEX_RADAR_DEC)),
+                    "get_multi_source_dossier": ("/api/v1/multi-source-dossier", float(settings.PRICE_PREMIUM_DEC)),
+                    "get_deep_market_report": ("/api/v1/deep-market-report", float(settings.PRICE_PREMIUM_DEC)),
                 }
                 if tool_name in endpoint_map:
                     ep_path, ep_price = endpoint_map[tool_name]
