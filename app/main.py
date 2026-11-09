@@ -51,7 +51,7 @@ def _bootstrap_canonical_endpoints(db_path: str | None) -> None:
             "asset_name": "WASTED",
             "asset_symbol": "WASTED",
             "coingecko_id": "wasted-2",
-            "price_usdc": 0.05,
+            "price_usdc": float(settings.PRICE_DYNAMIC_DEC),
         }
     ]
 

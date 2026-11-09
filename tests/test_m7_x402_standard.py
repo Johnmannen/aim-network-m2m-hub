@@ -12,7 +12,7 @@ from app.config import settings
 from app.database import get_stats
 from app.main import create_app
 
-URL = "/api/v1/crypto-pulse"  # 0.01 USDC -> 10000 units
+URL = "/api/v1/crypto-pulse"  # 0.005 USDC -> 5000 units
 TX = "0x" + "ab" * 32
 
 
@@ -20,7 +20,7 @@ def _client(tmp_path):
     return TestClient(create_app(str(tmp_path / "x.db")))
 
 
-def _header(value=10000, to=None, valid_before=None, version=1, nonce="0x" + "11" * 32):
+def _header(value=5000, to=None, valid_before=None, version=1, nonce="0x" + "11" * 32):
     auth = {
         "from": "0x" + "22" * 20,
         "to": to or settings.WALLET_ADDRESS,
@@ -79,7 +79,7 @@ def test_402_advertises_standard_requirements(tmp_path, facilitator):
     assert body["x402Version"] == 1 and "payment_details" in body  # legacy preserved
     acc = body["accepts"][0]
     assert acc["scheme"] == "exact" and acc["network"] == "base"
-    assert acc["maxAmountRequired"] == "10000"
+    assert acc["maxAmountRequired"] == "5000"
     assert acc["payTo"] == settings.WALLET_ADDRESS
     assert acc["asset"] == settings.USDC_CONTRACT_ADDRESS
     assert acc["extra"] == {"name": "USD Coin", "version": "2"}
@@ -87,7 +87,7 @@ def test_402_advertises_standard_requirements(tmp_path, facilitator):
     v2 = json.loads(base64.b64decode(r.headers["PAYMENT-REQUIRED"]))
     assert v2["x402Version"] == 2
     assert v2["accepts"][0]["network"] == "eip155:8453"
-    assert v2["accepts"][0]["amount"] == "10000"
+    assert v2["accepts"][0]["amount"] == "5000"
 
 
 @pytest.mark.parametrize("hdr", ["X-PAYMENT", "PAYMENT-SIGNATURE"])
@@ -110,7 +110,7 @@ def test_v2_payload_accepted(tmp_path, facilitator):
 @pytest.mark.parametrize(
     "kwargs",
     [
-        {"value": 9999},
+        {"value": 4999},
         {"to": "0x" + "99" * 20},
         {"valid_before": int(time.time()) - 5},
         {"nonce": "0x1234"},

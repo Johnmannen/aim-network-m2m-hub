@@ -52,15 +52,16 @@ def requirements(
         "maxTimeoutSeconds": MAX_TIMEOUT_SECONDS,
         "asset": settings.USDC_CONTRACT_ADDRESS,
         "extra": dict(USDC_EIP712),
-    }
-    if version >= 2:
-        return {"network": NETWORK_V2, "amount": units, **base}
-    return {
-        "network": NETWORK_V1,
-        "maxAmountRequired": units,
         "resource": resource_url,
         "description": description,
         "mimeType": "application/json",
+        "maxAmountRequired": units,
+        "amount": units,
+    }
+    if version >= 2:
+        return {"network": NETWORK_V2, **base}
+    return {
+        "network": NETWORK_V1,
         **base,
     }
 

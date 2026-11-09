@@ -7,6 +7,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from app.config import settings
 from app.database import init_db, get_stats
 from app.routers.api_v1 import router as api_v1_router
 
@@ -27,11 +28,11 @@ def test_crypto_pulse_and_deep_report_flow(tmp_path: Path):
     # 1. Without proof -> 402
     r1 = client.get("/api/v1/crypto-pulse")
     assert r1.status_code == 402
-    assert r1.json()["payment_details"]["amount"] == "0.01"
+    assert r1.json()["payment_details"]["amount"] == "0.005"
 
     r2 = client.get("/api/v1/deep-market-report")
     assert r2.status_code == 402
-    assert r2.json()["payment_details"]["amount"] == "1.00"
+    assert r2.json()["payment_details"]["amount"] == "0.15"
 
     # 2. With valid proof -> 200 OK & structured payload
     r1_paid = client.get(
@@ -60,7 +61,7 @@ def test_crypto_pulse_and_deep_report_flow(tmp_path: Path):
     stats = get_stats(db_file)
     assert stats["calls_micro"] == 1
     assert stats["calls_premium"] == 1
-    assert stats["revenue_usdc"] == 1.01
+    assert abs(stats["revenue_usdc"] - (settings.PRICE_MICRO_USDC + settings.PRICE_PREMIUM_USDC)) < 1e-6
 
 
 def test_sample_mode_bypasses_x402_for_schema_preview(tmp_path: Path):
@@ -310,7 +311,7 @@ def test_paid_canonical_flags_live_data_and_records_telemetry(tmp_path, monkeypa
     stats = get_stats(db_file)
     row = next(ep for ep in stats["dynamic_endpoints"] if ep["slug"] == "morpho")
     assert row["calls_count"] == 1
-    assert abs(row["revenue_usdc"] - 0.05) < 1e-9
+    assert abs(row["revenue_usdc"] - settings.PRICE_DYNAMIC_USDC) < 1e-9
 
 
 def test_trending_serves_last_good_live_instead_of_seed(monkeypatch):

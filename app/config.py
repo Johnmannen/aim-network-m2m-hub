@@ -73,12 +73,13 @@ class Settings:
     X402_FACILITATOR_URL: str = os.getenv("X402_FACILITATOR_URL", "").strip()
     X402_FACILITATOR_AUTH: str = os.getenv("X402_FACILITATOR_AUTH", "").strip()
 
-    # Pricing tiers in USDC (Decimal-safe)
-    PRICE_MICRO_DEC: Decimal = Decimal("0.01")
-    PRICE_DYNAMIC_DEC: Decimal = Decimal("0.05")
-    PRICE_DEX_RADAR_DEC: Decimal = Decimal("0.05")
-    PRICE_PREMIUM_DEC: Decimal = Decimal("1.00")
-    PRICE_VIP_24H_DEC: Decimal = Decimal("2.00")
+    # Pricing tiers in USDC (Decimal-safe) — Updated for x402 v2 market competitiveness
+    PRICE_MICRO_DEC: Decimal = Decimal("0.005")
+    PRICE_DYNAMIC_DEC: Decimal = Decimal("0.010")
+    PRICE_DEX_RADAR_DEC: Decimal = Decimal("0.020")
+    PRICE_PREMIUM_DEC: Decimal = Decimal("0.150")
+    PRICE_VIP_24H_DEC: Decimal = Decimal("1.50")
+    PRICE_QUALITY_DEC: Decimal = Decimal("0.002")
     PRO_PASS_PRICE_DEC: Decimal = Decimal("10.00")
 
     PRICE_MICRO_USDC: float = float(PRICE_MICRO_DEC)
@@ -86,8 +87,9 @@ class Settings:
     PRICE_DEX_RADAR_USDC: float = float(PRICE_DEX_RADAR_DEC)
     PRICE_PREMIUM_USDC: float = float(PRICE_PREMIUM_DEC)
     PRICE_VIP_24H_USDC: float = float(PRICE_VIP_24H_DEC)
+    PRICE_QUALITY_USDC: float = float(PRICE_QUALITY_DEC)
 
-    VIP_PASS_MAX_CALLS: int = 500
+    VIP_PASS_MAX_CALLS: int = 250
     VIP_PASS_DURATION_HOURS: int = 24
 
     PRO_PASS_MAX_CALLS: int = 50

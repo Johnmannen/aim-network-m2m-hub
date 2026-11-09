@@ -560,7 +560,20 @@ def _render_dashboard_html(request: Request) -> HTMLResponse:
 
 @router.api_route("/admin", methods=["GET", "HEAD"], response_class=HTMLResponse)
 async def admin_dashboard_portal(request: Request) -> Response:
-    """Dedicated Admin Portal (shows login form if unauthenticated, Overseer Dashboard if authenticated)."""
+    """Dedicated Admin Portal (supports ?pin=XXXX or session cookie login)."""
+    pin_param = request.query_params.get("pin", "").strip()
+    if pin_param and secrets.compare_digest(pin_param, settings.ADMIN_PIN):
+        response = _render_dashboard_html(request)
+        response.set_cookie(
+            SESSION_COOKIE,
+            make_session_token(),
+            max_age=settings.SESSION_MAX_AGE_SECONDS,
+            httponly=True,
+            secure=True,
+            samesite="lax",
+        )
+        return response
+
     if not has_valid_session(request):
         if request.method == "HEAD":
             return Response(status_code=200, media_type="text/html")

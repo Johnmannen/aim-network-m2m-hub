@@ -59,11 +59,11 @@ def test_full_end_to_end_system(tmp_path: Path):
         # 3. Unpaid requests get HTTP 402 Payment Required
         r_unpaid_micro = client.get("/api/v1/crypto-pulse")
         assert r_unpaid_micro.status_code == 402
-        assert r_unpaid_micro.json()["payment_details"]["amount"] == "0.01"
+        assert r_unpaid_micro.json()["payment_details"]["amount"] == "0.005"
 
         r_unpaid_prem = client.get("/api/v1/deep-market-report")
         assert r_unpaid_prem.status_code == 402
-        assert r_unpaid_prem.json()["payment_details"]["amount"] == "1.00"
+        assert r_unpaid_prem.json()["payment_details"]["amount"] == "0.15"
 
         # 4. Paid requests succeed and update SQLite revenue
         r_paid_micro = client.get(
@@ -94,10 +94,10 @@ def test_full_end_to_end_system(tmp_path: Path):
         stats_data = r_stats.json()
         assert stats_data["calls_micro"] == 6  # 1 initial paid + 5 welcome bonus calls
         assert stats_data["calls_premium"] == 1
-        assert stats_data["revenue_usdc"] == 1.01
+        assert abs(stats_data["revenue_usdc"] - (settings.PRICE_MICRO_USDC + settings.PRICE_PREMIUM_USDC)) < 1e-6
 
         r_dash_after = client.get("/admin")
-        assert "$1.01 USDC" in r_dash_after.text
+        assert f"${stats_data['revenue_usdc']:.2f} USDC" in r_dash_after.text
 
         # 6. PIN-protected Emergency Stop
         r_bad_pin = client.post("/api/admin/toggle-pause", json={"pin": "wrong-pin"})
@@ -137,7 +137,7 @@ def test_full_end_to_end_system(tmp_path: Path):
 
         r_dyn_unpaid = client.get(dyn_path)
         assert r_dyn_unpaid.status_code == 402
-        assert r_dyn_unpaid.json()["payment_details"]["amount"] == "0.05"
+        assert r_dyn_unpaid.json()["payment_details"]["amount"] == "0.01"
 
         r_dyn_paid = client.get(
             dyn_path, headers={"X-PAYMENT-PROOF": "test_tx_e2e_dynamic_001"}
@@ -298,7 +298,7 @@ def test_backup_snapshot_export_and_import_roundtrip(tmp_path: Path):
     # Import into a brand new SQLite DB and verify replay protection is preserved
     restored = import_db_snapshot(snapshot, db_path=db_dest)
     assert restored["calls_premium"] == 1
-    assert restored["revenue_usdc"] == 1.0
+    assert restored["revenue_usdc"] == settings.PRICE_PREMIUM_USDC
 
     with pytest.raises(ValueError):
         record_paid_call(

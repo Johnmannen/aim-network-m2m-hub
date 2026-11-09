@@ -200,7 +200,7 @@ def test_admin_simulate_and_reset_purchase(tmp_path):
 
     stats_after_sim = c.get("/api/admin/stats").json()
     assert stats_after_sim["calls_micro"] == 1
-    assert stats_after_sim["revenue_usdc"] == 0.01
+    assert stats_after_sim["revenue_usdc"] == settings.PRICE_MICRO_USDC
     assert stats_after_sim["traffic_telemetry"]["paid_200"] == 1
 
     # Trigger 1-click reset of simulated purchases

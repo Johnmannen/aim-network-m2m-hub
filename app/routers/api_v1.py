@@ -11,10 +11,14 @@ from app.config import settings
 from app.database import get_stats, increment_dynamic_endpoint_stats
 from app.services.market_data import (
     PAID_MAX_STALE_AGE_SECONDS,
+    fetch_arb_scanner_data,
     fetch_base_dex_radar,
     fetch_crypto_pulse_data,
+    fetch_data_quality,
     fetch_deep_market_report,
     fetch_dynamic_asset_pulse,
+    fetch_multi_source_dossier,
+    fetch_sentiment_signals,
     fetch_trending_dex_tokens,
 )
 from app.x402 import require_x402_payment
@@ -719,3 +723,232 @@ async def get_dynamic_trending_endpoint(slug: str, request: Request):
             },
         }
     return {k: v for k, v in dynamic_pulse.items() if k != "_observed_ts"}
+
+
+@router.api_route(
+    "/arb-scanner",
+    methods=["GET", "HEAD"],
+    openapi_extra={
+        "x-payment-protocol": "x402",
+        "x-payment-network": "base-mainnet",
+        "x-payment-chain-id": 8453,
+        "x-payment-token": "USDC",
+        "x-payment-token-contract": settings.USDC_CONTRACT_ADDRESS,
+        "x-payment-recipient": settings.WALLET_ADDRESS,
+        "x-payment-price-usdc": settings.PRICE_MICRO_USDC,
+        "x-sample-url": "/api/v1/arb-scanner?sample=true",
+    },
+)
+async def get_arb_scanner(request: Request):
+    """
+    Base L2 Real-time Arbitrage, Spread & Momentum Scanner ($0.005 USDC):
+    Delivers cross-asset ratios (ETH/BTC, SOL/ETH), spread efficiency, and Base L2 gas benchmarks.
+    Append ?sample=true for a free schema verification sample.
+    """
+    if _is_sample_request(request):
+        if request.method == "HEAD":
+            return Response(status_code=200, media_type="application/json")
+        sample_payload = {
+            "timestamp": "2026-01-01T00:00:00Z",
+            "service": "arb-scanner",
+            "tier": "micro_0.005_usdc",
+            "benchmark_prices": {"BTC": 85000.0, "ETH": 3200.0, "SOL": 180.0},
+            "arbitrage_ratios": [
+                {"pair": "ETH/BTC", "ratio": 0.037647, "momentum_1h": "steady", "spread_efficiency_pct": 99.85},
+                {"pair": "SOL/ETH", "ratio": 0.05625, "momentum_1h": "expanding", "spread_efficiency_pct": 99.72},
+            ],
+            "base_l2_gas_gwei": 0.005,
+            "meta": {"status": "SCHEMA_SAMPLE_ONLY", "disclaimer": "Structure template only. Live data requires 0.005 USDC."},
+        }
+        return {
+            "status": "SAMPLE_DATA_VERIFIED",
+            "sample_mode": True,
+            "feed": "/api/v1/arb-scanner",
+            "live_price_usdc": settings.PRICE_MICRO_USDC,
+            "payload": sample_payload,
+        }
+
+    db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
+    payment_check = await require_x402_payment(
+        request=request,
+        price_usdc=settings.PRICE_MICRO_DEC,
+        description="Base L2 Real-time Arbitrage, Spread & Momentum Scanner (JSON)",
+        tier="micro",
+        db_path=db_override,
+    )
+    if payment_check:
+        return payment_check
+
+    return await fetch_arb_scanner_data()
+
+
+@router.api_route(
+    "/sentiment-signals",
+    methods=["GET", "HEAD"],
+    openapi_extra={
+        "x-payment-protocol": "x402",
+        "x-payment-network": "base-mainnet",
+        "x-payment-chain-id": 8453,
+        "x-payment-token": "USDC",
+        "x-payment-token-contract": settings.USDC_CONTRACT_ADDRESS,
+        "x-payment-recipient": settings.WALLET_ADDRESS,
+        "x-payment-price-usdc": settings.PRICE_DEX_RADAR_USDC,
+        "x-sample-url": "/api/v1/sentiment-signals?sample=true",
+    },
+)
+async def get_sentiment_signals(request: Request):
+    """
+    Multi-Source Quantitative Sentiment & Action Signals ($0.020 USDC):
+    Delivers structured quantitative trading signals (regime, primary signal, confidence score, and key drivers).
+    Append ?sample=true for a free schema verification sample.
+    """
+    if _is_sample_request(request):
+        if request.method == "HEAD":
+            return Response(status_code=200, media_type="application/json")
+        sample_payload = {
+            "timestamp": "2026-01-01T00:00:00Z",
+            "service": "sentiment-signals",
+            "tier": "micro_0.02_usdc",
+            "regime": "bullish_expansion",
+            "primary_signal": "CAUTION_OVERBOUGHT",
+            "confidence": 0.72,
+            "fear_and_greed": {"value": 74, "classification": "Greed"},
+            "volatility_regime": "MODERATE",
+            "key_drivers": ["Fear & Greed Index elevated", "Parkinson aggregate volatility at 2.4%"],
+            "meta": {"status": "SCHEMA_SAMPLE_ONLY"},
+        }
+        return {
+            "status": "SAMPLE_DATA_VERIFIED",
+            "sample_mode": True,
+            "feed": "/api/v1/sentiment-signals",
+            "live_price_usdc": settings.PRICE_DEX_RADAR_USDC,
+            "payload": sample_payload,
+        }
+
+    db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
+    payment_check = await require_x402_payment(
+        request=request,
+        price_usdc=settings.PRICE_DEX_RADAR_DEC,
+        description="Multi-Source Quantitative Sentiment & Action Signals (JSON)",
+        tier="micro",
+        db_path=db_override,
+    )
+    if payment_check:
+        return payment_check
+
+    return await fetch_sentiment_signals()
+
+
+@router.api_route(
+    "/multi-source-dossier",
+    methods=["GET", "HEAD"],
+    openapi_extra={
+        "x-payment-protocol": "x402",
+        "x-payment-network": "base-mainnet",
+        "x-payment-chain-id": 8453,
+        "x-payment-token": "USDC",
+        "x-payment-token-contract": settings.USDC_CONTRACT_ADDRESS,
+        "x-payment-recipient": settings.WALLET_ADDRESS,
+        "x-payment-price-usdc": settings.PRICE_PREMIUM_USDC,
+        "x-sample-url": "/api/v1/multi-source-dossier?sample=true",
+    },
+)
+async def get_multi_source_dossier(request: Request):
+    """
+    Comprehensive Multi-Source Intelligence Dossier ($0.150 USDC):
+    Delivers multi-source spot data, Base liquidity metrics, sentiment, and actionable trading directives.
+    Append ?sample=true for a free schema verification sample.
+    """
+    if _is_sample_request(request):
+        if request.method == "HEAD":
+            return Response(status_code=200, media_type="application/json")
+        sample_payload = {
+            "timestamp": "2026-01-01T00:00:00Z",
+            "service": "multi-source-dossier",
+            "tier": "premium_0.15_usdc",
+            "dossier_summary": {
+                "executive_verdict": "NEUTRAL_ACCUMULATION",
+                "risk_score_10": 4.5,
+                "liquidity_depth_score_10": 8.2,
+                "actionable_bot_directives": ["Execute Base L2 spot swaps within <0.2% slippage"],
+            },
+            "meta": {"status": "SCHEMA_SAMPLE_ONLY"},
+        }
+        return {
+            "status": "SAMPLE_DATA_VERIFIED",
+            "sample_mode": True,
+            "feed": "/api/v1/multi-source-dossier",
+            "live_price_usdc": settings.PRICE_PREMIUM_USDC,
+            "payload": sample_payload,
+        }
+
+    db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
+    payment_check = await require_x402_payment(
+        request=request,
+        price_usdc=settings.PRICE_PREMIUM_DEC,
+        description="Comprehensive Multi-Source Quantitative Intelligence Dossier (JSON)",
+        tier="premium",
+        db_path=db_override,
+    )
+    if payment_check:
+        return payment_check
+
+    return await fetch_multi_source_dossier()
+
+
+@router.api_route(
+    "/quality/{slug}",
+    methods=["GET", "HEAD"],
+    openapi_extra={
+        "x-payment-protocol": "x402",
+        "x-payment-network": "base-mainnet",
+        "x-payment-chain-id": 8453,
+        "x-payment-token": "USDC",
+        "x-payment-token-contract": settings.USDC_CONTRACT_ADDRESS,
+        "x-payment-recipient": settings.WALLET_ADDRESS,
+        "x-payment-price-usdc": settings.PRICE_QUALITY_USDC,
+        "x-sample-url": "/api/v1/quality/btc?sample=true",
+    },
+)
+async def get_data_quality_audit(slug: str, request: Request):
+    """
+    Data Quality, Staleness & Integrity Audit per Asset ($0.002 USDC):
+    Delivers verifiable data age, upstream status, fallback flags, and consensus health.
+    Append ?sample=true for a free schema verification sample.
+    """
+    if _is_sample_request(request):
+        if request.method == "HEAD":
+            return Response(status_code=200, media_type="application/json")
+        sample_payload = {
+            "timestamp": "2026-01-01T00:00:00Z",
+            "service": "data-quality-audit",
+            "target_slug": slug.lower(),
+            "tier": "micro_0.002_usdc",
+            "quality_score": 98.5,
+            "is_stale": False,
+            "data_age_seconds": 12,
+            "as_of": "2026-01-01T00:00:00Z",
+            "source_status": "SCHEMA_SAMPLE_ONLY",
+            "fallback_reason": None,
+            "node_consensus_healthy": True,
+        }
+        return {
+            "status": "SAMPLE_DATA_VERIFIED",
+            "sample_mode": True,
+            "feed": f"/api/v1/quality/{slug}",
+            "live_price_usdc": settings.PRICE_QUALITY_USDC,
+            "payload": sample_payload,
+        }
+
+    db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
+    payment_check = await require_x402_payment(
+        request=request,
+        price_usdc=settings.PRICE_QUALITY_DEC,
+        description=f"Independent Data Quality & Integrity Audit for {slug.upper()} (JSON)",
+        tier="micro",
+        db_path=db_override,
+    )
+    if payment_check:
+        return payment_check
+
+    return await fetch_data_quality(slug)

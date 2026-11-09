@@ -53,29 +53,47 @@ async def llms_txt_manifest(request: Request) -> str:
     )
 
     return f"""# AIM Network — Autonomous M2M API Hub
-> Ultra-fast (<150ms cached) machine-payable data endpoints via HTTP 402 (x402 protocol) on Base Mainnet (Chain ID 8453).
-> No account or API key required. Pay per call in USDC on Base and pass transaction hash in `X-PAYMENT-PROOF` header.
+> Ultra-fast (<150ms cached) machine-payable data endpoints via HTTP 402 (x402 v2 protocol) on Base Mainnet (Chain ID 8453).
+> No account or API key required. Pay per call in USDC on Base via PAYMENT-SIGNATURE or legacy X-PAYMENT-PROOF header.
 
-## Payment Configuration (x402 v1.0)
-- **Network:** `base-mainnet` (Chain ID: `8453`)
+## Payment Configuration (x402 v2.0 Standard)
+- **Network:** `eip155:8453` (Base Mainnet, Chain ID: `8453`)
 - **Token:** `USDC` (`{settings.USDC_CONTRACT_ADDRESS}`)
 - **Recipient Wallet:** `{settings.WALLET_ADDRESS}`
-- **Proof Header:** `X-PAYMENT-PROOF: <0x_base_transaction_hash>`
-- **Free Schema Verification:** Append `?sample=true` to ANY endpoint (e.g. `/api/v1/crypto-pulse?sample=true`) for a free JSON schema verification sample before purchasing live data.
+- **Payment Header (v2):** `PAYMENT-SIGNATURE: <base64_signed_authorization>`
+- **Challenge Header (v2):** `PAYMENT-REQUIRED: <base64_x402_requirements>`
+- **Receipt Header (v2):** `PAYMENT-RESPONSE: <base64_settlement_receipt>`
+- **Catalog Route (Free 0.00 USDC):** `GET /api/catalog`
+- **Free Schema Verification:** Append `?sample=true` to ANY endpoint for a free schema verification sample before purchasing live data.
 {std_x402_note}
 ## Available M2M Endpoints
-0. `GET /api/v1/free-teaser`
+0. `GET /api/catalog`
+   - **Price:** `0.00 USDC (FREE)`
+   - **Description:** Complete machine-readable catalog of all active feeds, pricing and x402 v2 parameters.
+1. `GET /api/v1/free-teaser`
    - **Price:** `0.00 USDC (FREE)`
    - **Description:** Instant live BTC spot & latency verification teaser for autonomous agents.
-1. `GET /api/v1/crypto-pulse`
-   - **Price:** `{settings.PRICE_MICRO_USDC:.2f} USDC` (Free sample: `?sample=true`)
+2. `GET /api/v1/arb-scanner`
+   - **Price:** `{settings.PRICE_MICRO_DEC} USDC` (Free sample: `?sample=true`)
+   - **Description:** Base L2 Real-time Arbitrage, Spread & Momentum Scanner across primary pairs.
+3. `GET /api/v1/crypto-pulse`
+   - **Price:** `{settings.PRICE_MICRO_DEC} USDC` (Free sample: `?sample=true`)
    - **Description:** Real-time BTC/ETH/SOL prices, 24h volatility index, and Fear & Greed sentiment JSON.
-2. `GET /api/v1/base-dex-radar`
-   - **Price:** `{settings.PRICE_DEX_RADAR_USDC:.2f} USDC` (Free sample: `?sample=true`)
+4. `GET /api/v1/sentiment-signals`
+   - **Price:** `{settings.PRICE_DEX_RADAR_DEC} USDC` (Free sample: `?sample=true`)
+   - **Description:** Multi-source quantitative market sentiment, orderflow & actionable signals.
+5. `GET /api/v1/base-dex-radar`
+   - **Price:** `{settings.PRICE_DEX_RADAR_DEC} USDC` (Free sample: `?sample=true`)
    - **Description:** Real-time Base L2 DEX liquidity pools, volume spikes, and whale inflow radar via DexScreener.
-3. `GET /api/v1/deep-market-report`
-   - **Price:** `{settings.PRICE_PREMIUM_USDC:.2f} USDC` (Free sample: `?sample=true`)
-   - **Description:** Institutional M2M quantitative market regime, Base L2 liquidity metrics, and actionable trading signals JSON.
+6. `GET /api/v1/quality/{{slug}}`
+   - **Price:** `{settings.PRICE_QUALITY_DEC} USDC` (Free sample: `?sample=true`)
+   - **Description:** Independent data quality, staleness, node consensus and integrity audit per asset.
+7. `GET /api/v1/multi-source-dossier`
+   - **Price:** `{settings.PRICE_PREMIUM_DEC} USDC` (Free sample: `?sample=true`)
+   - **Description:** Comprehensive multi-source intelligence report & institutional decision dossier.
+8. `GET /api/v1/deep-market-report`
+   - **Price:** `{settings.PRICE_PREMIUM_DEC} USDC` (Free sample: `?sample=true`)
+   - **Description:** Institutional M2M quantitative market regime, Base L2 liquidity metrics, and macro signals JSON.
 {dynamic_lines}
 ## Quantitative Classification Standards
 - **Market Sentiment Enum:** `bullish_expansion` (F&G > 65, BTC up), `overbought_pullback` (F&G > 65, BTC down), `cautious_rebound` (F&G < 35, BTC up), `bearish_fear` (F&G < 35, BTC down), `bullish_momentum` (Neutral F&G, BTC up), `bearish_consolidation` (Neutral F&G, BTC down).
@@ -85,19 +103,21 @@ async def llms_txt_manifest(request: Request) -> str:
   - `HIGH (>4.0%)`: Elevated expansion or liquidation regime.
 
 ## Welcome Bonus: First-Time Buyer Campaign (Buy 1, Get 5 Free)
-- New wallet addresses that make their first USDC purchase on ANY endpoint automatically unlock **5 FREE bonus calls** across all micro feeds ($0.01-$0.05) for 24 hours.
+- New wallet addresses that make their first USDC purchase on ANY endpoint automatically unlock **5 FREE bonus calls** across all micro feeds for 24 hours.
 - Reuse the same `tx_hash` in `X-PAYMENT-PROOF: <tx_hash>` to consume your 5 bonus calls.
 
 ## Volume Discount: 24-Hour VIP Passes
-- **24-Hour Micro VIP Pass (`{settings.PRICE_VIP_24H_USDC:.2f} USDC`):** Pay `{settings.PRICE_VIP_24H_USDC:.2f} USDC` once to unlock **{settings.VIP_PASS_MAX_CALLS} calls across all micro feeds ($0.01-$0.05)** for 24 hours (0.004 USDC/call, 60-92% discount). Bound to verified payer wallet.
-- **24-Hour Pro VIP Pass (`10.00 USDC`):** Pay `10.00 USDC` once to unlock **{settings.PRO_PASS_MAX_CALLS} calls across ALL endpoints including Deep Market Reports ($1.00)** for 24 hours (0.20 USDC/call, 80% discount).
+- **24-Hour Micro VIP Pass (`{settings.PRICE_VIP_24H_DEC} USDC`):** Pay `{settings.PRICE_VIP_24H_DEC} USDC` once to unlock **{settings.VIP_PASS_MAX_CALLS} calls across all micro feeds ($0.005-$0.020)** for 24 hours. Bound to verified payer wallet.
+- **24-Hour Pro VIP Pass (`10.00 USDC`):** Pay `10.00 USDC` once to unlock **{settings.PRO_PASS_MAX_CALLS} calls across ALL endpoints including Multi-Source Dossiers (${settings.PRICE_PREMIUM_DEC})** for 24 hours.
 
 ## Replay Prevention & Single-Use Token Burn
 - Single-use on-chain transaction hashes are permanently burned in SQLite on first consumption. Replay attempts from any client are immediately rejected with HTTP 402 `REPLAY_REJECTED`.
 - For zero-sharing guarantee, agents should use standard x402 (EIP-3009 signed transfer authorization), which is cryptographically tied to the payer's private key.
 
 ## Machine Catalogs & Legal
+- Full Machine Catalog: `/api/catalog`
 - Agent Catalog: `/agents.json`
+- Official x402 Discovery Card: `/.well-known/x402.json`
 - MCP Server Manifest & JSON-RPC: `/mcp`
 - A2A Agent Card: `/.well-known/agent.json`
 - Trending Assets Index: `/api/v1/trending`
@@ -151,14 +171,19 @@ async def sitemap_xml(request: Request):
     stats = get_stats(db_override)
     urls = [
         f"{base}/",
+        f"{base}/api/catalog",
         f"{base}/llms.txt",
         f"{base}/agents.json",
         f"{base}/.well-known/agent.json",
+        f"{base}/.well-known/x402.json",
         f"{base}/openapi.json",
         f"{base}/api/v1/free-teaser",
         f"{base}/api/v1/trending",
         f"{base}/api/v1/crypto-pulse",
+        f"{base}/api/v1/arb-scanner",
+        f"{base}/api/v1/sentiment-signals",
         f"{base}/api/v1/base-dex-radar",
+        f"{base}/api/v1/multi-source-dossier",
         f"{base}/api/v1/deep-market-report",
     ]
     for ep in stats.get("dynamic_endpoints", []):
@@ -384,6 +409,183 @@ async def well_known_agent_card(request: Request) -> Response:
                 "outputModes": ["application/json"],
             },
         ],
+    })
+
+
+@router.api_route("/api/catalog", methods=["GET", "HEAD"], response_class=JSONResponse)
+@router.api_route("/catalog", methods=["GET", "HEAD"], response_class=JSONResponse)
+async def api_catalog_endpoint(request: Request) -> Response:
+    """Full machine-readable API catalog for x402 v2 catalog bots and AI agents."""
+    if request.method == "HEAD":
+        return Response(status_code=200, media_type="application/json")
+    base = settings.CANONICAL_BASE_URL.rstrip("/")
+    db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
+    stats = get_stats(db_override)
+    from app import x402_standard
+
+    endpoints = [
+        {
+            "id": "catalog",
+            "path": "/api/catalog",
+            "method": "GET",
+            "tier": "free",
+            "price_usdc": 0.0,
+            "price_base_units": "0",
+            "requires_payment": False,
+            "description": "Full machine-readable catalog of all AIM Network endpoints and pricing.",
+        },
+        {
+            "id": "free-teaser",
+            "path": "/api/v1/free-teaser",
+            "method": "GET",
+            "tier": "free",
+            "price_usdc": 0.0,
+            "price_base_units": "0",
+            "requires_payment": False,
+            "description": "Free instant live BTC spot preview & latency verification teaser.",
+        },
+        {
+            "id": "arb-scanner",
+            "path": "/api/v1/arb-scanner",
+            "sample_url": "/api/v1/arb-scanner?sample=true",
+            "method": "GET",
+            "tier": "micro",
+            "price_usdc": float(settings.PRICE_MICRO_DEC),
+            "price_base_units": str(x402_standard.to_units(settings.PRICE_MICRO_DEC)),
+            "requires_payment": True,
+            "description": "Base L2 Real-time Arbitrage, Spread & Momentum Scanner.",
+        },
+        {
+            "id": "crypto-pulse",
+            "path": "/api/v1/crypto-pulse",
+            "sample_url": "/api/v1/crypto-pulse?sample=true",
+            "method": "GET",
+            "tier": "micro",
+            "price_usdc": float(settings.PRICE_MICRO_DEC),
+            "price_base_units": str(x402_standard.to_units(settings.PRICE_MICRO_DEC)),
+            "requires_payment": True,
+            "description": "Verified Real-time Crypto Pulse (BTC/ETH/SOL/Base) & Freshness.",
+        },
+        {
+            "id": "sentiment-signals",
+            "path": "/api/v1/sentiment-signals",
+            "sample_url": "/api/v1/sentiment-signals?sample=true",
+            "method": "GET",
+            "tier": "micro",
+            "price_usdc": float(settings.PRICE_DEX_RADAR_DEC),
+            "price_base_units": str(x402_standard.to_units(settings.PRICE_DEX_RADAR_DEC)),
+            "requires_payment": True,
+            "description": "Multi-source market sentiment, orderflow & action signals.",
+        },
+        {
+            "id": "base-dex-radar",
+            "path": "/api/v1/base-dex-radar",
+            "sample_url": "/api/v1/base-dex-radar?sample=true",
+            "method": "GET",
+            "tier": "micro",
+            "price_usdc": float(settings.PRICE_DEX_RADAR_DEC),
+            "price_base_units": str(x402_standard.to_units(settings.PRICE_DEX_RADAR_DEC)),
+            "requires_payment": True,
+            "description": "Real-time Base L2 Aerodrome DEX Liquidity Radar & Whale Watch.",
+        },
+        {
+            "id": "quality-audit",
+            "path": "/api/v1/quality/{slug}",
+            "sample_url": "/api/v1/quality/btc?sample=true",
+            "method": "GET",
+            "tier": "micro",
+            "price_usdc": float(settings.PRICE_QUALITY_DEC),
+            "price_base_units": str(x402_standard.to_units(settings.PRICE_QUALITY_DEC)),
+            "requires_payment": True,
+            "description": "Independent data quality, staleness, node proveniens and integrity audit per asset.",
+        },
+        {
+            "id": "multi-source-dossier",
+            "path": "/api/v1/multi-source-dossier",
+            "sample_url": "/api/v1/multi-source-dossier?sample=true",
+            "method": "GET",
+            "tier": "premium",
+            "price_usdc": float(settings.PRICE_PREMIUM_DEC),
+            "price_base_units": str(x402_standard.to_units(settings.PRICE_PREMIUM_DEC)),
+            "requires_payment": True,
+            "description": "Comprehensive multi-source intelligence report & decision dossier.",
+        },
+        {
+            "id": "deep-market-report",
+            "path": "/api/v1/deep-market-report",
+            "sample_url": "/api/v1/deep-market-report?sample=true",
+            "method": "GET",
+            "tier": "premium",
+            "price_usdc": float(settings.PRICE_PREMIUM_DEC),
+            "price_base_units": str(x402_standard.to_units(settings.PRICE_PREMIUM_DEC)),
+            "requires_payment": True,
+            "description": "Institutional-grade market regime & macro crypto summary.",
+        },
+        {
+            "id": "vip-pass",
+            "path": "/api/v1/vip-pass",
+            "method": "GET",
+            "tier": "pass",
+            "price_usdc": float(settings.PRICE_VIP_24H_DEC),
+            "price_base_units": str(x402_standard.to_units(settings.PRICE_VIP_24H_DEC)),
+            "requires_payment": True,
+            "description": f"24-Hour Micro VIP Pass ({settings.VIP_PASS_MAX_CALLS} calls across all micro feeds).",
+        },
+    ]
+
+    for ep in stats.get("dynamic_endpoints", []):
+        endpoints.append({
+            "id": f"trending-{ep['slug']}",
+            "path": ep["endpoint_path"],
+            "sample_url": f"{ep['endpoint_path']}?sample=true",
+            "method": "GET",
+            "tier": "micro",
+            "price_usdc": float(ep["price_usdc"]),
+            "price_base_units": str(x402_standard.to_units(ep["price_usdc"])),
+            "requires_payment": True,
+            "description": f"Live orderflow & pulse for {ep['asset_name']} ({ep['asset_symbol']}).",
+        })
+
+    return JSONResponse({
+        "catalog_version": "2.0.0",
+        "hub_name": settings.PROJECT_NAME,
+        "base_url": base,
+        "x402": {
+            "version": 2,
+            "network": "eip155:8453",
+            "chain_id": settings.BASE_CHAIN_ID,
+            "asset": settings.USDC_CONTRACT_ADDRESS,
+            "asset_symbol": "USDC",
+            "asset_decimals": 6,
+            "pay_to": settings.WALLET_ADDRESS,
+            "facilitator_url": settings.X402_FACILITATOR_URL,
+            "headers": {
+                "request_payment": "PAYMENT-SIGNATURE (or X-PAYMENT)",
+                "challenge": "PAYMENT-REQUIRED (Base64 JSON)",
+                "receipt": "PAYMENT-RESPONSE (Base64 JSON)",
+            },
+        },
+        "endpoints_count": len(endpoints),
+        "endpoints": endpoints,
+    })
+
+
+@router.api_route("/.well-known/x402.json", methods=["GET", "HEAD"], response_class=JSONResponse)
+@router.api_route("/.well-known/x402", methods=["GET", "HEAD"], response_class=JSONResponse)
+async def well_known_x402_manifest(request: Request) -> Response:
+    """Official x402 v2 discovery card for autonomous buying agents and crawlers."""
+    if request.method == "HEAD":
+        return Response(status_code=200, media_type="application/json")
+    base = settings.CANONICAL_BASE_URL.rstrip("/")
+    return JSONResponse({
+        "x402Version": 2,
+        "catalogUrl": f"{base}/api/catalog",
+        "agentCardUrl": f"{base}/.well-known/agent.json",
+        "mcpUrl": f"{base}/mcp",
+        "network": "eip155:8453",
+        "asset": settings.USDC_CONTRACT_ADDRESS,
+        "payTo": settings.WALLET_ADDRESS,
+        "facilitator": settings.X402_FACILITATOR_URL,
     })
 
 

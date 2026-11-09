@@ -49,6 +49,15 @@ def to_micro_usdc(amount_usdc: float | str | Decimal) -> int:
     )
 
 
+def format_price_str(price_usdc: float | Decimal | str) -> str:
+    """Format USDC price string accurately preserving micro-cents (e.g. 0.005, 0.02, 0.15, 1.50)."""
+    d = Decimal(str(price_usdc))
+    s = f"{d:.4f}".rstrip("0").rstrip(".")
+    if "." in s and len(s.split(".")[1]) < 2:
+        return f"{d:.2f}"
+    return s
+
+
 def build_402_response(
     price_usdc: float | Decimal,
     description: str,
@@ -57,9 +66,9 @@ def build_402_response(
     sample_teaser: Optional[Dict[str, Any]] = None,
     resource_url: str = "",
 ) -> JSONResponse:
-    """Build standard x402 v1.0 machine-readable payment requirement response with live teaser."""
-    price_str = f"{Decimal(str(price_usdc)):.2f}"
-    vip_str = f"{settings.PRICE_VIP_24H_DEC:.2f}"
+    """Build standard x402 v2.0 machine-readable payment requirement response with live teaser."""
+    price_str = format_price_str(price_usdc)
+    vip_str = format_price_str(settings.PRICE_VIP_24H_DEC)
     teaser = sample_teaser or {
         "live_feed_verified": True,
         "sla_latency_ms": "<150ms server-side (cached)",
@@ -69,6 +78,9 @@ def build_402_response(
             "Base L2 DEX Whale Liquidity & Actionable Signals",
         ],
     }
+    v2_payment_req_header = x402_standard.payment_required_header(
+        price_usdc, description, resource_url
+    )
     headers = {
         "X-Payment-Version": "x402/1.0",
         "X-Payment-Network": "base-mainnet",
@@ -85,22 +97,23 @@ def build_402_response(
             "token": "USDC",
             "token_contract": settings.USDC_CONTRACT_ADDRESS,
             "amount": price_str,
+            "amount_units": str(x402_standard.to_units(price_usdc)),
             "recipient": settings.WALLET_ADDRESS,
             "description": description,
             "vip_24h_pass_options": {
                 "micro_pass": {
-                    "price_usdc": f"{settings.PRICE_VIP_24H_DEC:.2f}",
+                    "price_usdc": vip_str,
                     "max_calls": settings.VIP_PASS_MAX_CALLS,
-                    "scope": "Micro feeds ($0.01-$0.05)",
+                    "scope": "Micro feeds ($0.005-$0.020)",
                     "description": (
-                        f"Pay {settings.PRICE_VIP_24H_DEC:.2f} USDC once to unlock a 24-hour Micro VIP Pass "
+                        f"Pay {vip_str} USDC once to unlock a 24-hour Micro VIP Pass "
                         f"({settings.VIP_PASS_MAX_CALLS} calls across micro feeds using the same tx_hash)."
                     ),
                 },
                 "pro_pass": {
                     "price_usdc": f"{settings.PRO_PASS_PRICE_DEC:.2f}",
                     "max_calls": settings.PRO_PASS_MAX_CALLS,
-                    "scope": "All feeds including Deep Market Report ($1.00)",
+                    "scope": f"All feeds including Deep Market Report / Multi-Source Dossier (${settings.PRICE_PREMIUM_DEC:.2f})",
                     "description": (
                         f"Pay {settings.PRO_PASS_PRICE_DEC:.2f} USDC once to unlock a 24-hour Pro VIP Pass "
                         f"({settings.PRO_PASS_MAX_CALLS} calls across all feeds using the same tx_hash)."
@@ -110,7 +123,7 @@ def build_402_response(
         },
         "free_live_teaser": teaser,
         "instructions": (
-            "Standard x402 (recommended): Sign EIP-3009 USDC authorization and send in X-PAYMENT or PAYMENT-SIGNATURE header. "
+            "Standard x402 v2 (recommended): Sign EIP-3009 USDC authorization and send in PAYMENT-SIGNATURE or X-PAYMENT header. "
             "Legacy on-chain: Transfer USDC on Base (Chain ID 8453) to recipient address and retry with transaction hash in X-PAYMENT-PROOF header."
         ),
     }
