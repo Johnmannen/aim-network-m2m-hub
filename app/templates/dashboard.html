@@ -2,302 +2,928 @@
 <html lang="sv">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
     <title>AIM NETWORK — Overseer Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg: #0b0f17;
-            --card: #131b2e;
-            --border: #1e293b;
+            --bg: #070b12;
+            --bg-card: rgba(15, 23, 42, 0.72);
+            --bg-card-solid: #0d1527;
+            --border: rgba(255, 255, 255, 0.08);
+            --border-hover: rgba(56, 189, 248, 0.35);
             --neon: #4ade80;
-            --text: #f1f5f9;
+            --neon-glow: rgba(74, 222, 128, 0.25);
+            --text: #f8fafc;
             --muted: #94a3b8;
+            --faint: #64748b;
             --accent: #38bdf8;
+            --accent-glow: rgba(56, 189, 248, 0.2);
+            --warn: #facc15;
+            --danger: #f87171;
+            --purple: #c084fc;
+            --radius-sm: 8px;
+            --radius-md: 12px;
+            --radius-lg: 16px;
         }
-        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            -webkit-tap-highlight-color: transparent;
+        }
+
         body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background-color: var(--bg);
+            background-image: 
+                radial-gradient(circle at 15% 10%, rgba(56, 189, 248, 0.06) 0%, transparent 40%),
+                radial-gradient(circle at 85% 85%, rgba(74, 222, 128, 0.05) 0%, transparent 40%);
+            background-attachment: fixed;
             color: var(--text);
-            padding: 20px;
-            max-width: 860px;
+            padding: 18px;
+            max-width: 1040px;
             margin: 0 auto;
             line-height: 1.5;
+            -webkit-font-smoothing: antialiased;
         }
+
+        /* Glassmorphism Card Style */
+        .glass-panel {
+            background: var(--bg-card);
+            backdrop-filter: blur(14px);
+            -webkit-backdrop-filter: blur(14px);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 20px;
+            margin-bottom: 18px;
+            box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.45);
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+        .glass-panel:hover {
+            border-color: rgba(255, 255, 255, 0.12);
+        }
+
+        /* Top Header Bar */
         .header-bar {
-            background: linear-gradient(135deg, #131b2e 0%, #0f172a 100%);
+            background: linear-gradient(135deg, rgba(19, 27, 46, 0.9) 0%, rgba(13, 21, 39, 0.85) 100%);
             border: 1px solid var(--border);
             border-left: 4px solid {{ status_badge_color }};
-            border-radius: 12px;
-            padding: 18px 20px;
+            border-radius: var(--radius-md);
+            padding: 16px 20px;
             margin-bottom: 18px;
             display: flex;
-            flex-wrap: wrap;
             justify-content: space-between;
             align-items: center;
+            flex-wrap: wrap;
             gap: 12px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
         }
-        .title-group h1 { font-size: 1.25rem; letter-spacing: 0.5px; color: #fff; }
-        .status-pill { font-weight: 700; color: {{ status_badge_color }}; font-size: 0.95rem; margin-top: 4px; }
-        .wallet-box {
-            background: rgba(56, 189, 248, 0.1);
-            border: 1px solid rgba(56, 189, 248, 0.3);
-            padding: 8px 12px;
-            border-radius: 8px;
-            font-family: monospace;
-            font-size: 0.85rem;
+        .title-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .brand-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 1.2px;
             color: var(--accent);
+            font-weight: 700;
         }
+        .title-group h1 {
+            font-size: 1.25rem;
+            font-weight: 800;
+            letter-spacing: 0.3px;
+            color: #fff;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-weight: 700;
+            color: {{ status_badge_color }};
+            font-size: 0.88rem;
+        }
+        .pulse-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: {{ status_badge_color }};
+            box-shadow: 0 0 8px {{ status_badge_color }};
+            animation: pulse-ring 2s infinite ease-in-out;
+        }
+        @keyframes pulse-ring {
+            0% { transform: scale(0.95); opacity: 0.8; }
+            50% { transform: scale(1.2); opacity: 1; }
+            100% { transform: scale(0.95); opacity: 0.8; }
+        }
+
+        .header-meta {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .wallet-box {
+            background: rgba(56, 189, 248, 0.08);
+            border: 1px solid rgba(56, 189, 248, 0.25);
+            padding: 8px 14px;
+            border-radius: var(--radius-sm);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.82rem;
+            color: var(--accent);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .wallet-box:hover {
+            background: rgba(56, 189, 248, 0.15);
+            border-color: rgba(56, 189, 248, 0.45);
+        }
+        .wallet-chip {
+            background: rgba(56, 189, 248, 0.2);
+            color: #fff;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.72rem;
+            font-weight: 600;
+        }
+
+        /* Top 2 Metric Cards Grid */
         .grid-2 {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
             gap: 16px;
             margin-bottom: 18px;
         }
-        .card {
-            background: var(--card);
+        .metric-card {
+            background: linear-gradient(145deg, rgba(19, 27, 46, 0.8) 0%, rgba(13, 21, 39, 0.9) 100%);
             border: 1px solid var(--border);
-            border-radius: 12px;
-            padding: 18px;
-            margin-bottom: 18px;
+            border-radius: var(--radius-md);
+            padding: 20px;
+            box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.4);
+            position: relative;
+            overflow: hidden;
         }
-        .card h2 {
-            font-size: 0.95rem;
+        .metric-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+        }
+        .metric-card.m-green::before { background: linear-gradient(90deg, #4ade80, #22c55e); }
+        .metric-card.m-cyan::before { background: linear-gradient(90deg, #38bdf8, #0ea5e9); }
+        
+        .metric-card h2 {
+            font-size: 0.82rem;
             text-transform: uppercase;
             letter-spacing: 0.8px;
             color: var(--muted);
-            margin-bottom: 12px;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
         }
-        .revenue-big { font-size: 2.2rem; font-weight: 800; color: var(--neon); font-family: monospace; }
-        .revenue-sub { font-size: 0.9rem; color: var(--muted); margin-top: 4px; }
+        .revenue-big {
+            font-size: clamp(1.85rem, 4vw, 2.3rem);
+            font-weight: 800;
+            color: var(--neon);
+            font-family: 'JetBrains Mono', monospace;
+            letter-spacing: -0.5px;
+        }
+        .revenue-sub {
+            font-size: 0.85rem;
+            color: var(--muted);
+            margin-top: 6px;
+            line-height: 1.4;
+        }
+
+        /* Funnel Radar (5 steps) */
+        .funnel-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+        .funnel-box {
+            background: rgba(255, 255, 255, 0.025);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 12px 14px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            transition: transform 0.15s ease, background 0.15s ease;
+        }
+        .funnel-box:hover {
+            background: rgba(255, 255, 255, 0.045);
+            transform: translateY(-2px);
+        }
+        .funnel-label {
+            font-size: 0.72rem;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+        .funnel-num {
+            font-size: 1.4rem;
+            font-weight: 800;
+            font-family: 'JetBrains Mono', monospace;
+            margin: 4px 0;
+            letter-spacing: -0.5px;
+        }
+        .funnel-desc {
+            font-size: 0.72rem;
+            color: var(--faint);
+            line-height: 1.3;
+        }
+
+        /* Diagnostic Alerts for Checkout Failures */
+        .diag-alert-card {
+            background: rgba(239, 68, 68, 0.08);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            border-radius: var(--radius-sm);
+            padding: 14px;
+            margin-bottom: 16px;
+        }
+        .diag-header {
+            font-weight: 700;
+            color: var(--danger);
+            font-size: 0.85rem;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .diag-row {
+            padding: 8px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 6px;
+            font-size: 0.8rem;
+        }
+        .diag-row:last-child { border-bottom: none; }
+
+        /* Bot pills container */
+        .bot-pills-bar {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-wrap: wrap;
+            margin-bottom: 14px;
+        }
+        .agent-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            background: rgba(56, 189, 248, 0.08);
+            border: 1px solid rgba(56, 189, 248, 0.2);
+            color: var(--text);
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 0.76rem;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .agent-pill strong { color: var(--accent); }
+
+        /* Search & Filter Controls */
+        .search-controls {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-bottom: 14px;
+        }
+        .search-input-wrapper {
+            position: relative;
+            width: 100%;
+        }
+        .search-input-wrapper span {
+            position: absolute;
+            left: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--muted);
+            pointer-events: none;
+            font-size: 0.9rem;
+        }
+        .search-input {
+            width: 100%;
+            background: #080d18;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 10px 14px 10px 38px;
+            color: #fff;
+            font-size: 0.85rem;
+            font-family: inherit;
+            transition: all 0.2s ease;
+        }
+        .search-input:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+            background: #0b1222;
+        }
+
+        .filter-scroll-bar {
+            display: flex;
+            gap: 8px;
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            padding-bottom: 4px;
+            scrollbar-width: none;
+        }
+        .filter-scroll-bar::-webkit-scrollbar { display: none; }
+        
+        .filter-btn {
+            white-space: nowrap;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--border);
+            color: var(--muted);
+            padding: 7px 14px;
+            border-radius: 999px;
+            font-size: 0.78rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            user-select: none;
+            min-height: 34px;
+        }
+        .filter-btn:hover {
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--text);
+        }
+        .filter-btn.active {
+            background: rgba(56, 189, 248, 0.18);
+            border-color: var(--accent);
+            color: var(--accent);
+            box-shadow: 0 0 10px rgba(56, 189, 248, 0.2);
+        }
+
+        /* Mobile Scroll Cue */
+        .mobile-scroll-cue {
+            display: none;
+            font-size: 0.74rem;
+            color: var(--muted);
+            text-align: right;
+            margin-bottom: 6px;
+        }
+
+        /* Table Design */
+        .table-responsive {
+            overflow-x: auto;
+            -webkit-overflow-scrolling: touch;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            background: rgba(10, 15, 26, 0.6);
+        }
+        .stream-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.8rem;
+            text-align: left;
+        }
+        .stream-table th {
+            color: var(--muted);
+            font-weight: 600;
+            padding: 10px 12px;
+            border-bottom: 1px solid var(--border);
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            background: rgba(255, 255, 255, 0.02);
+            white-space: nowrap;
+        }
+        .stream-table td {
+            padding: 9px 12px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+            white-space: nowrap;
+        }
+        .stream-table tr:last-child td {
+            border-bottom: none;
+        }
+        .stream-table tr:hover td {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .stream-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 5px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+            letter-spacing: -0.2px;
+        }
+        .b-paid { background: rgba(74, 222, 128, 0.18); color: #4ade80; border: 1px solid rgba(74, 222, 128, 0.3); }
+        .b-quote { background: rgba(250, 204, 21, 0.18); color: #facc15; border: 1px solid rgba(250, 204, 21, 0.3); }
+        .b-disc { background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); }
+        .b-block { background: rgba(239, 68, 68, 0.18); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
+
+        .country-tag {
+            background: rgba(255, 255, 255, 0.06);
+            padding: 2px 7px;
+            border-radius: 4px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.72rem;
+            color: var(--muted);
+        }
+        .visitor-pill {
+            cursor: pointer;
+            padding: 3px 8px;
+            border-radius: 6px;
+            background: rgba(56, 189, 248, 0.08);
+            border: 1px dashed rgba(56, 189, 248, 0.3);
+            color: #38bdf8;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.74rem;
+            display: inline-block;
+            transition: all 0.15s ease;
+        }
+        .visitor-pill:hover {
+            background: rgba(56, 189, 248, 0.2);
+            color: #7dd3fc;
+            border-style: solid;
+        }
+
+        /* Pagination Footer */
+        .pagination-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 14px;
+            padding-top: 12px;
+            border-top: 1px solid var(--border);
+            font-size: 0.8rem;
+            color: var(--muted);
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        .btn-page {
+            background: #141f36;
+            color: #e2e8f0;
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 7px 14px;
+            font-size: 0.78rem;
+            font-weight: 600;
+            cursor: pointer;
+            min-height: 36px;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            transition: all 0.15s ease;
+        }
+        .btn-page:hover:not(:disabled) {
+            background: #1e2d4a;
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+        .btn-page:disabled {
+            opacity: 0.35;
+            cursor: not-allowed;
+        }
+
+        /* Visitor Journey Drawer */
+        .journey-panel {
+            background: #090e1a;
+            border: 1px solid var(--accent);
+            border-radius: var(--radius-md);
+            padding: 16px;
+            margin-top: 14px;
+            display: none;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.6);
+        }
+        .journey-timeline-item {
+            padding: 6px 0;
+            border-bottom: 1px dashed rgba(255, 255, 255, 0.08);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        /* Agent Crew Grid */
+        .agent-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+            gap: 12px;
+        }
+        .agent-box {
+            background: rgba(255, 255, 255, 0.025);
+            border: 1px solid var(--border);
+            border-left: 3px solid var(--neon);
+            border-radius: var(--radius-sm);
+            padding: 14px;
+            transition: transform 0.15s ease;
+        }
+        .agent-box:hover {
+            transform: translateY(-2px);
+            background: rgba(255, 255, 255, 0.04);
+        }
+        .agent-box h3 {
+            font-size: 0.88rem;
+            color: #fff;
+            margin-bottom: 6px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .agent-box p {
+            font-size: 0.8rem;
+            color: var(--muted);
+            line-height: 1.45;
+        }
+
+        /* Active Services List */
         .endpoint-row {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            padding: 12px;
-            background: rgba(255,255,255,0.03);
+            padding: 12px 14px;
+            background: rgba(255, 255, 255, 0.025);
             border: 1px solid var(--border);
-            border-radius: 8px;
-            margin-bottom: 10px;
+            border-radius: var(--radius-sm);
+            margin-bottom: 8px;
             flex-wrap: wrap;
-            gap: 8px;
+            gap: 10px;
+            transition: all 0.15s ease;
         }
-        .endpoint-code { font-family: monospace; color: var(--accent); font-weight: 600; }
+        .endpoint-row:hover {
+            background: rgba(255, 255, 255, 0.045);
+            border-color: rgba(255, 255, 255, 0.14);
+        }
+        .endpoint-left {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .endpoint-code {
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--accent);
+            font-weight: 600;
+            font-size: 0.84rem;
+        }
         .price-tag {
-            background: rgba(74, 222, 128, 0.15);
+            background: rgba(74, 222, 128, 0.12);
             color: var(--neon);
             padding: 2px 8px;
             border-radius: 6px;
-            font-size: 0.8rem;
-            font-weight: 700;
-            font-family: monospace;
-        }
-        .log-item {
-            padding: 12px;
-            background: rgba(255,255,255,0.02);
-            border-left: 3px solid var(--accent);
-            border-radius: 6px;
-            margin-bottom: 10px;
-        }
-        .log-header { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 4px; }
-        .badge-scout {
-            background: #3b82f6;
-            color: #fff;
-            font-size: 0.7rem;
-            font-weight: 700;
-            padding: 2px 6px;
-            border-radius: 4px;
-        }
-        .log-title { font-weight: 600; font-size: 0.92rem; }
-        .log-rationale { font-size: 0.83rem; color: var(--muted); margin-top: 2px; }
-        .actions-bar { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 10px; }
-        button {
-            cursor: pointer;
-            border: none;
-            border-radius: 8px;
-            padding: 12px 18px;
-            font-weight: 700;
-            font-size: 0.9rem;
-            color: #fff;
-            transition: opacity 0.15s;
-        }
-        button:hover { opacity: 0.9; }
-        .btn-stop { background: {{ btn_bg }}; flex: 1; min-width: 220px; }
-        .btn-scout { background: #2563eb; }
-        .btn-refresh { background: #334155; }
-        .btn-preview {
-            background: rgba(56, 189, 248, 0.15);
-            border: 1px solid rgba(56, 189, 248, 0.4);
-            color: var(--accent);
-            padding: 5px 10px;
             font-size: 0.78rem;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+            border: 1px solid rgba(74, 222, 128, 0.25);
+        }
+        .badge-scout {
+            color: #fff;
+            font-size: 0.68rem;
+            font-weight: 700;
+            padding: 2px 7px;
+            border-radius: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+        }
+        .endpoint-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            font-size: 0.8rem;
+        }
+        .btn-preview {
+            background: rgba(56, 189, 248, 0.12);
+            border: 1px solid rgba(56, 189, 248, 0.35);
+            color: var(--accent);
+            padding: 6px 12px;
+            font-size: 0.76rem;
+            font-weight: 600;
             border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            min-height: 32px;
         }
-        .agent-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
-        .agent-box {
-            background: rgba(255,255,255,0.03);
-            border: 1px solid var(--border);
-            border-left: 3px solid var(--neon);
-            border-radius: 8px;
-            padding: 10px 12px;
+        .btn-preview:hover {
+            background: rgba(56, 189, 248, 0.24);
+            border-color: var(--accent);
+            color: #fff;
         }
-        .agent-box h3 { font-size: 0.85rem; color: #fff; margin-bottom: 4px; }
-        .agent-box p { font-size: 0.78rem; color: var(--muted); }
+
         .inspector-pre {
             background: #06090f;
             border: 1px solid var(--border);
-            border-radius: 8px;
+            border-radius: var(--radius-sm);
             padding: 14px;
             color: #4ade80;
-            font-family: monospace;
-            font-size: 0.8rem;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.78rem;
             overflow-x: auto;
-            max-height: 340px;
+            max-height: 360px;
             margin-top: 12px;
             display: none;
+            box-shadow: inset 0 2px 8px rgba(0,0,0,0.5);
         }
-        .funnel-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(175px, 1fr)); gap: 12px; margin-bottom: 14px; }
-        .funnel-box { background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
-        .funnel-num { font-size: 1.55rem; font-weight: 800; font-family: monospace; margin-top: 2px; }
-        .funnel-label { font-size: 0.76rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
-        .agent-pill {
-            display: inline-block;
-            background: rgba(56, 189, 248, 0.1);
-            border: 1px solid rgba(56, 189, 248, 0.25);
-            color: var(--text);
-            padding: 4px 10px;
-            border-radius: 999px;
-            font-size: 0.78rem;
-            margin-right: 6px;
+
+        /* Scout Log Items */
+        .log-item {
+            padding: 12px 14px;
+            background: rgba(255, 255, 255, 0.02);
+            border-left: 3px solid var(--accent);
+            border-radius: var(--radius-sm);
+            margin-bottom: 10px;
+        }
+        .log-header {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-wrap: wrap;
             margin-bottom: 6px;
         }
-        .stream-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; margin-top: 10px; }
-        .stream-table th {
-            text-align: left;
-            color: var(--muted);
-            font-weight: 600;
-            padding: 8px 6px;
-            border-bottom: 1px solid var(--border);
-            font-size: 0.74rem;
-            text-transform: uppercase;
+        .log-title { font-weight: 600; font-size: 0.88rem; }
+        .log-rationale { font-size: 0.8rem; color: var(--muted); line-height: 1.4; margin-top: 2px; }
+
+        /* Command Center Buttons */
+        .actions-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+            gap: 10px;
+            margin-top: 12px;
         }
-        .stream-table td { padding: 8px 6px; border-bottom: 1px solid rgba(255,255,255,0.04); }
-        .stream-badge { padding: 2px 7px; border-radius: 5px; font-size: 0.72rem; font-weight: 700; font-family: monospace; }
-        .b-paid { background: rgba(74, 222, 128, 0.2); color: #4ade80; }
-        .b-quote { background: rgba(250, 204, 21, 0.2); color: #facc15; }
-        .b-disc { background: rgba(56, 189, 248, 0.18); color: #38bdf8; }
-        .b-block { background: rgba(239, 68, 68, 0.2); color: #f87171; }
-        .country-tag { background: rgba(255,255,255,0.07); padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 0.74rem; }
-        .links-footer { display: flex; gap: 16px; flex-wrap: wrap; font-size: 0.85rem; color: var(--muted); margin-top: 8px; }
-        .links-footer a { color: var(--accent); text-decoration: none; }
-        .search-row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; align-items: center; }
-        .search-input { flex: 1; min-width: 220px; background: #06090f; border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; color: #fff; font-size: 0.85rem; }
-        .filter-btn { background: rgba(255,255,255,0.05); border: 1px solid var(--border); color: var(--muted); padding: 6px 12px; border-radius: 6px; font-size: 0.76rem; cursor: pointer; font-weight: 600; }
-        .filter-btn.active { background: rgba(56, 189, 248, 0.2); border-color: var(--accent); color: var(--accent); }
-        .pagination-row { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 0.8rem; color: var(--muted); }
-        .btn-page { background: #1e293b; color: #e2e8f0; border: 1px solid var(--border); border-radius: 6px; padding: 6px 14px; font-size: 0.78rem; cursor: pointer; }
-        .btn-page:disabled { opacity: 0.4; cursor: not-allowed; }
-        .visitor-pill { cursor: pointer; text-decoration: underline dotted; color: #38bdf8; font-family: monospace; font-size: 0.75rem; }
-        .visitor-pill:hover { color: #7dd3fc; }
-        .journey-panel { background: #06090f; border: 1px solid #38bdf8; border-radius: 8px; padding: 14px; margin-top: 12px; display: none; }
+        button {
+            cursor: pointer;
+            border: none;
+            border-radius: var(--radius-sm);
+            padding: 11px 16px;
+            font-weight: 700;
+            font-size: 0.84rem;
+            color: #fff;
+            transition: transform 0.12s ease, opacity 0.15s ease, box-shadow 0.15s ease;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            min-height: 42px;
+            text-align: center;
+        }
+        button:hover {
+            opacity: 0.92;
+            transform: translateY(-1px);
+        }
+        button:active {
+            transform: translateY(0);
+        }
+        .btn-stop {
+            background: {{ btn_bg }};
+            grid-column: 1 / -1;
+            font-size: 0.92rem;
+            box-shadow: 0 4px 14px rgba(220, 38, 38, 0.3);
+        }
+        .btn-action-green { background: #059669; }
+        .btn-action-amber { background: #b45309; }
+        .btn-action-slate { background: #475569; }
+        .btn-action-blue  { background: #2563eb; }
+
+        /* Links Footer (Machine Catalogs) */
+        .links-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 12px;
+        }
+        .chip-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--border);
+            color: var(--muted);
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-size: 0.78rem;
+            text-decoration: none;
+            transition: all 0.15s ease;
+        }
+        .chip-link:hover {
+            background: rgba(56, 189, 248, 0.1);
+            border-color: var(--accent);
+            color: var(--accent);
+        }
+        .chip-link strong { color: var(--text); }
+
+        /* Mobile Optimization Breakpoints */
+        @media (max-width: 768px) {
+            body {
+                padding: 12px 10px;
+            }
+            .header-bar {
+                flex-direction: column;
+                align-items: flex-start;
+                padding: 14px 16px;
+            }
+            .wallet-box {
+                width: 100%;
+                justify-content: space-between;
+            }
+            .grid-2 {
+                grid-template-columns: 1fr;
+                gap: 12px;
+            }
+            .funnel-grid {
+                grid-template-columns: repeat(2, 1fr);
+                gap: 8px;
+            }
+            .funnel-box:nth-child(5) {
+                grid-column: 1 / -1;
+            }
+            .actions-grid {
+                grid-template-columns: 1fr 1fr;
+                gap: 8px;
+            }
+            .btn-stop {
+                grid-column: 1 / -1;
+            }
+            .endpoint-row {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 8px;
+            }
+            .endpoint-right {
+                width: 100%;
+                justify-content: space-between;
+            }
+            .mobile-scroll-cue {
+                display: block;
+            }
+            .agent-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .actions-grid {
+                grid-template-columns: 1fr;
+            }
+            .pagination-row {
+                flex-direction: column;
+                align-items: stretch;
+                text-align: center;
+            }
+            .pagination-row > div:last-child {
+                display: flex;
+                justify-content: space-between;
+                width: 100%;
+            }
+            .btn-page {
+                flex: 1;
+                justify-content: center;
+            }
+        }
     </style>
 </head>
 <body>
+
+    <!-- Header Bar -->
     <div class="header-bar">
         <div class="title-group">
+            <div class="brand-badge">⚡ Autonomous Intelligence Marketplace</div>
             <h1>AIM NETWORK — OVERSEER DASHBOARD</h1>
-            <div class="status-pill" id="statusText">{{ status_dot }}</div>
+            <div class="status-pill" id="statusText">
+                <span class="pulse-dot"></span>
+                <span>{{ status_dot }}</span>
+            </div>
         </div>
-        <div class="wallet-box" title="{{ wallet }}">
-            Plånbok (Base USDC): <strong>{{ short_wallet }}</strong> • Läge: <strong>{{ v_mode_label }}</strong>
+        <div class="header-meta">
+            <div class="wallet-box" title="Klicka för att kopiera Base-plånbok: {{ wallet }}" onclick="copyWalletAddress('{{ wallet }}')">
+                <span>Base USDC: <strong>{{ short_wallet }}</strong></span>
+                <span class="wallet-chip">📋 Kopiera</span>
+            </div>
+            <div class="wallet-box" style="cursor:default; border-color: rgba(255,255,255,0.1); background: rgba(255,255,255,0.03); color: var(--muted);">
+                <span>{{ v_mode_label }}</span>
+            </div>
         </div>
     </div>
 
+    <!-- Top Metrics: Intäkter & Anropsvolym -->
     <div class="grid-2">
-        <div class="card" style="margin-bottom:0;">
-            <h2>💰 INTÄKTER (Base USDC Plånbok)</h2>
+        <div class="metric-card m-green">
+            <h2>💰 Intäkter (Base USDC Plånbok)</h2>
             <div class="revenue-big" id="totalRevenue">${{ "%.2f"|format(total_rev) }} USDC</div>
-            <div class="revenue-sub">≈ {{ "%.2f"|format(total_sek) }} SEK • Direkt till {{ short_wallet }}</div>
+            <div class="revenue-sub">≈ {{ "%.2f"|format(total_sek) }} SEK • Omedelbar avräkning till {{ short_wallet }}</div>
         </div>
-        <div class="card" style="margin-bottom:0;">
-            <h2>⚡ ANROPSVOLYM (x402 M2M)</h2>
-            <div class="revenue-big" style="color:#38bdf8;" id="totalCalls">{{ stats.calls_micro + stats.calls_premium }} st</div>
-            <div class="revenue-sub">Mikro ($0.01–$0.05): {{ stats.calls_micro }} st • Premium ($1.00): {{ stats.calls_premium }} st</div>
+        <div class="metric-card m-cyan">
+            <h2>⚡ Anropsvolym (x402 M2M Hub)</h2>
+            <div class="revenue-big" style="color:var(--accent);" id="totalCalls">{{ stats.calls_micro + stats.calls_premium }} st</div>
+            <div class="revenue-sub">Mikro ($0.005–$0.02): {{ stats.calls_micro }} st • Premium ($0.15): {{ stats.calls_premium }} st</div>
         </div>
     </div>
 
-    <div class="card">
-        <h2>📡 LIVE TRAFIK- & KONVERTERINGS-RADAR (Externa AI-Botar & Besökare)</h2>
+    <!-- Live Trafik- & Konverterings-Radar -->
+    <div class="glass-panel">
+        <h2 style="font-size:0.92rem; text-transform:uppercase; letter-spacing:0.8px; color:var(--muted); margin-bottom:14px; display:flex; align-items:center; gap:8px;">
+            📡 Live Trafik- & Konverterings-Radar (Externa AI-Botar & Besökare)
+        </h2>
+
+        <!-- Funnel Grid (5 boxes) -->
         <div class="funnel-grid">
             <div class="funnel-box" style="border-left: 3px solid #38bdf8;">
-                <div class="funnel-label">🔍 1. Meny & Katalog</div>
-                <div class="funnel-num" style="color:#38bdf8;">{{ telemetry.discovery_hits }} st</div>
-                <div class="revenue-sub">/api/catalog, /llms.txt, /mcp</div>
+                <div class="funnel-label">🔍 1. Meny / Katalog</div>
+                <div class="funnel-num" style="color:#38bdf8;">{{ telemetry.discovery_hits }}</div>
+                <div class="funnel-desc">/api/catalog, /llms.txt</div>
             </div>
             <div class="funnel-box" style="border-left: 3px solid #facc15;">
-                <div class="funnel-label">🚪 2. Prisförfrågningar (402 Probes)</div>
-                <div class="funnel-num" style="color:#facc15;">{{ telemetry.quotes_402 }} st</div>
-                <div class="revenue-sub">Botar som efterfrågat pris</div>
+                <div class="funnel-label">🚪 2. Prisförfrågan (402)</div>
+                <div class="funnel-num" style="color:#facc15;">{{ telemetry.quotes_402 }}</div>
+                <div class="funnel-desc">Botar som fått offert</div>
             </div>
             <div class="funnel-box" style="border-left: 3px solid #4ade80;">
-                <div class="funnel-label">💰 3. Genomförda Köp (200 OK)</div>
-                <div class="funnel-num" style="color:#4ade80;">{{ telemetry.paid_200 }} st ({{ telemetry.conversion_rate_pct }}%)</div>
-                <div class="revenue-sub">Verifierade köp med kvitto</div>
+                <div class="funnel-label">💰 3. Köp (200 OK)</div>
+                <div class="funnel-num" style="color:#4ade80;">{{ telemetry.paid_200 }} <span style="font-size:0.85rem; font-weight:600; color:var(--muted);">({{ telemetry.conversion_rate_pct }}%)</span></div>
+                <div class="funnel-desc">Verifierade betalningar</div>
             </div>
             <div class="funnel-box" style="border-left: 3px solid #f87171;">
-                <div class="funnel-label">⚠️ 4. Nekade Köp (Kassa-fel)</div>
-                <div class="funnel-num" style="color:#f87171;">{{ telemetry.payment_rejected_hits }} st</div>
-                <div class="revenue-sub">Underbetald, fel signatur, replay</div>
+                <div class="funnel-label">⚠️ 4. Nekade Köp</div>
+                <div class="funnel-num" style="color:#f87171;">{{ telemetry.payment_rejected_hits }}</div>
+                <div class="funnel-desc">Kassa- & signaturfel</div>
             </div>
-            <div class="funnel-box" style="border-left: 3px solid #a855f7;">
-                <div class="funnel-label">⚡ 5. Snitt-Svarstid & Skydd</div>
+            <div class="funnel-box" style="border-left: 3px solid #c084fc;">
+                <div class="funnel-label">⚡ 5. Svarstid & Skydd</div>
                 <div class="funnel-num" style="color:#c084fc;">{{ telemetry.avg_latency_ms }} ms</div>
-                <div class="revenue-sub">Totalt: {{ telemetry.total_external_requests }} anrop • Blockerade: {{ telemetry.blocked_hits }}</div>
+                <div class="funnel-desc">Tot: {{ telemetry.total_external_requests }} | Block: {{ telemetry.blocked_hits }}</div>
             </div>
         </div>
 
+        <!-- Checkout Failures Alert (if any) -->
         {% if checkout_failures %}
-        <div style="background:rgba(239, 68, 68, 0.1); border:1px solid rgba(239, 68, 68, 0.3); border-radius:8px; padding:12px; margin-bottom:14px;">
-            <div style="font-weight:700; color:#f87171; font-size:0.85rem; margin-bottom:6px;">
+        <div class="diag-alert-card">
+            <div class="diag-header">
                 🚨 SENASTE NEKADE KÖPFÖRSÖK I KASSAN (FELSÖKNING):
             </div>
-            <div style="font-size:0.8rem; color:#e5e7eb;">
-                {% for f in checkout_failures %}
-                <div style="padding:4px 0; border-bottom:1px solid rgba(255,255,255,0.05); display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px;">
-                    <div>
-                        <span style="color:#f87171; font-weight:600;">[{{ f.failure_type }}]</span>
-                        <code style="color:#38bdf8;">{{ f.endpoint }}</code>: {{ f.reason }}
-                    </div>
-                    <div style="color:var(--muted); font-family:monospace; font-size:0.75rem;">
-                        {{ f.created_at[11:19] }} | {{ f.payer_or_proof[:25] }}
-                    </div>
+            {% for f in checkout_failures %}
+            <div class="diag-row">
+                <div>
+                    <span style="color:#f87171; font-weight:700;">[{{ f.failure_type }}]</span>
+                    <code class="endpoint-code">{{ f.endpoint }}</code>: {{ f.reason }}
                 </div>
-                {% endfor %}
+                <div style="color:var(--muted); font-family:'JetBrains Mono',monospace; font-size:0.74rem;">
+                    {{ f.created_at[11:19] }} | {{ f.payer_or_proof[:22] }}
+                </div>
             </div>
+            {% endfor %}
         </div>
         {% endif %}
 
-        <div style="margin-bottom: 10px;">
-            <div class="funnel-label" style="margin-bottom:6px;">🤖 Identifierade Besökare & Bot-Typer (User-Agent Detektor):</div>
+        <!-- Identified Bot Agents Breakdown -->
+        <div class="bot-pills-bar">
+            <span style="font-size:0.75rem; color:var(--muted); text-transform:uppercase; font-weight:600;">🤖 Identifierade Bot-Typer:</span>
             {% if telemetry.agent_breakdown %}
                 {% for ab in telemetry.agent_breakdown %}
                     <span class="agent-pill">{{ ab.agent_type }}: <strong>{{ ab.cnt }}</strong></span>
                 {% endfor %}
             {% else %}
-                <span class="agent-pill">Väntar på första externa anropet...</span>
+                <span class="agent-pill" style="color:var(--faint);">Väntar på extern trafik...</span>
             {% endif %}
         </div>
 
-        <div class="search-row">
-            <input type="text" id="trafficSearchInput" class="search-input" placeholder="🔍 Sök i besöksloggen (endpoint, agent, land, visitor_id...)" onkeydown="if(event.key==='Enter')applyTrafficSearch()">
-            <button class="filter-btn active" id="f-ALL" onclick="setTrafficFilter('ALL')">Alla</button>
-            <button class="filter-btn" id="f-PAID" onclick="setTrafficFilter('PAID')">💰 Köp (200)</button>
-            <button class="filter-btn" id="f-QUOTE" onclick="setTrafficFilter('QUOTE')">🚪 402 Offert</button>
-            <button class="filter-btn" id="f-REJECT" onclick="setTrafficFilter('REJECT')">⚠️ Nekade Köp</button>
-            <button class="filter-btn" id="f-BOTS" onclick="setTrafficFilter('BOTS')">🤖 AI-Botar</button>
+        <!-- Search & Category Filters -->
+        <div class="search-controls">
+            <div class="search-input-wrapper">
+                <span>🔍</span>
+                <input type="text" id="trafficSearchInput" class="search-input" placeholder="Sök i besöksloggen (endpoint, agent, land, visitor_id...)" onkeydown="if(event.key==='Enter')applyTrafficSearch()">
+            </div>
+            <div class="filter-scroll-bar">
+                <button class="filter-btn active" id="f-ALL" onclick="setTrafficFilter('ALL')">Alla Anrop</button>
+                <button class="filter-btn" id="f-PAID" onclick="setTrafficFilter('PAID')">💰 Genomförda Köp (200)</button>
+                <button class="filter-btn" id="f-QUOTE" onclick="setTrafficFilter('QUOTE')">🚪 402 Prisofferter</button>
+                <button class="filter-btn" id="f-REJECT" onclick="setTrafficFilter('REJECT')">⚠️ Nekade Köp</button>
+                <button class="filter-btn" id="f-BOTS" onclick="setTrafficFilter('BOTS')">🤖 Externa AI-Botar</button>
+            </div>
         </div>
 
-        <div style="overflow-x:auto;">
+        <!-- Mobile Scroll Indicator -->
+        <div class="mobile-scroll-cue">↔️ Dra i tabellen för att se alla kolumner</div>
+
+        <!-- Responsive Traffic Table -->
+        <div class="table-responsive">
             <table class="stream-table">
                 <thead>
                     <tr>
@@ -306,7 +932,7 @@
                         <th>Besökar-ID (Session)</th>
                         <th>Identifierad Agent / Bot</th>
                         <th>Anropad Endpoint</th>
-                        <th>Händelse / Status</th>
+                        <th>Status / Händelse</th>
                         <th style="text-align:right;">Svarstid</th>
                     </tr>
                 </thead>
@@ -314,7 +940,7 @@
                     {% if paginated_traffic and paginated_traffic.records %}
                         {% for ev in paginated_traffic.records %}
                         <tr>
-                            <td style="font-family:monospace;color:var(--muted);">{{ ev.created_at[11:19] }}</td>
+                            <td style="font-family:'JetBrains Mono',monospace;color:var(--muted);">{{ ev.created_at[11:19] }}</td>
                             <td><span class="country-tag">{{ ev.country }}</span></td>
                             <td><span class="visitor-pill" onclick="openVisitorJourney('{{ ev.visitor_id }}')">🕵️ {{ ev.visitor_id }}</span></td>
                             <td>{{ ev.agent_type }}</td>
@@ -332,12 +958,12 @@
                                     <span class="stream-badge b-disc">⚪ {{ ev.status_code }}</span>
                                 {% endif %}
                             </td>
-                            <td style="font-family:monospace;text-align:right;">{{ "%.1f"|format(ev.latency_ms) }} ms</td>
+                            <td style="font-family:'JetBrains Mono',monospace;text-align:right;">{{ "%.1f"|format(ev.latency_ms) }} ms</td>
                         </tr>
                         {% endfor %}
                     {% else %}
                         <tr>
-                            <td colspan="7" style="text-align:center;color:var(--muted);padding:14px;">
+                            <td colspan="7" style="text-align:center;color:var(--muted);padding:18px;">
                                 Inga externa anrop matchar sökningen.
                             </td>
                         </tr>
@@ -346,6 +972,7 @@
             </table>
         </div>
 
+        <!-- Pagination Controls -->
         <div class="pagination-row">
             <div>
                 Visar <span id="paginatedInfo">Sida {{ paginated_traffic.page }} av {{ paginated_traffic.total_pages }} (Totalt {{ paginated_traffic.total_items }} anrop sparade)</span>
@@ -356,126 +983,144 @@
             </div>
         </div>
 
+        <!-- Visitor Journey Timeline Drawer -->
         <div id="visitorJourneyBox" class="journey-panel">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
-                <strong style="color:#38bdf8;font-size:0.9rem;" id="journeyTitle">🕵️ BESÖKARENS FULLA RESA</strong>
-                <button style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:1.1rem;" onclick="closeVisitorJourney()">✖ Stäng</button>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+                <strong style="color:var(--accent);font-size:0.92rem;" id="journeyTitle">🕵️ BESÖKARENS FULLA RESA</strong>
+                <button style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:1.1rem;padding:4px 8px;min-height:auto;" onclick="closeVisitorJourney()">✖ Stäng</button>
             </div>
-            <div id="journeyTimeline" style="font-size:0.8rem;line-height:1.6;font-family:monospace;"></div>
+            <div id="journeyTimeline" style="font-size:0.8rem;line-height:1.6;font-family:'JetBrains Mono',monospace;"></div>
         </div>
     </div>
 
-    <div class="card">
-        <h2>🤖 AGENT-BESÄTTNING (4 Autonoma Moduler i Drift)</h2>
+    <!-- Agent-Besättning (4 Autonoma Moduler i Drift) -->
+    <div class="glass-panel">
+        <h2 style="font-size:0.92rem; text-transform:uppercase; letter-spacing:0.8px; color:var(--muted); margin-bottom:14px; display:flex; align-items:center; gap:8px;">
+            🤖 Agent-Besättning (4 Autonoma Moduler i Kontinuerlig Drift)
+        </h2>
         <div class="agent-grid" id="agentCrewGrid">
             <div class="agent-box">
                 <h3>🟢 1. Spanar- & Bygg-Agent</h3>
-                <p>Skannar trender varje timme och bygger nya API:er automatiskt ({{ scout_built_count }} st extra byggda + {{ canonical_count }} kanoniska).</p>
+                <p>Skannar marknadstrender varje timme och driftsätter nya efterfrågade API:er automatiskt ({{ scout_built_count }} st auto-byggda + {{ canonical_count }} kanoniska).</p>
             </div>
             <div class="agent-box">
                 <h3>🟢 2. Data- & Analys-Agent</h3>
-                <p>Hämtar och beräknar live-priser, volatilitet och handels-signaler på under 0,15 sek.</p>
+                <p>Samlar och beräknar live-kurser, orderflöden, volatilitet och AI-dossier på under 0,15 sekunder via in-memory cache.</p>
             </div>
             <div class="agent-box">
-                <h3>🟢 3. x402 Kassa- & Säkerhets-Agent</h3>
-                <p>Tar betalt i USDC på Base ({{ short_wallet }}) och stoppar obetalda anrop (HTTP 402).</p>
+                <h3>🟢 3. x402 Kassa- & Säkerhet</h3>
+                <p>Kassör som tar betalt i USDC på Base ({{ short_wallet }}), avvisar obetalda anrop (HTTP 402) och validerar EIP-3009 signaturer.</p>
             </div>
             <div class="agent-box">
                 <h3>🟢 4. Skyltfönster-Agent</h3>
-                <p>Marknadsför alla {{ total_active_apis }} tjänster automatiskt i /llms.txt och /agents.json.</p>
+                <p>Marknadsför alla {{ total_active_apis }} tjänster dynamiskt till omvärlden i /llms.txt, /agents.json och /.well-known/agent.json.</p>
             </div>
         </div>
     </div>
 
-    <div class="card">
-        <h2>📊 AKTIVA TJÄNSTER (Klicka på "👁️ Granska Data" för att se exakt vad som säljs live till botarna)</h2>
+    <!-- Aktiva Tjänster & Prissättning -->
+    <div class="glass-panel">
+        <h2 style="font-size:0.92rem; text-transform:uppercase; letter-spacing:0.8px; color:var(--muted); margin-bottom:14px; display:flex; align-items:center; gap:8px;">
+            📊 Aktiva Tjänster (Klicka på "👁️ Granska Data" för att inspektera live-datan som säljs)
+        </h2>
+
         <div class="endpoint-row">
-            <div>
+            <div class="endpoint-left">
                 <span class="endpoint-code">1. /api/v1/arb-scanner</span>
                 <span class="price-tag">$0.005 USDC</span>
-                <span class="badge-scout" style="background:#2563eb;margin-left:6px;">VOLYM-TJÄNST (SPREAD & ARB)</span>
+                <span class="badge-scout" style="background:#2563eb;">VOLYM-TJÄNST (SPREAD & ARB)</span>
             </div>
-            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-                <span>🟢 Live Base L2</span>
+            <div class="endpoint-right">
+                <span style="color:var(--muted);">🟢 Live Base L2</span>
                 <button class="btn-preview" onclick="previewProduct('/api/v1/arb-scanner')">👁️ Granska Data</button>
             </div>
         </div>
+
         <div class="endpoint-row">
-            <div>
+            <div class="endpoint-left">
                 <span class="endpoint-code">2. /api/v1/crypto-pulse</span>
                 <span class="price-tag">$0.005 USDC</span>
             </div>
-            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-                <span>Anrop: <strong>{{ stats.calls_micro }} st</strong> | Intäkt: <strong>${{ "%.2f"|format(micro_rev) }} USDC</strong> | 🟢</span>
+            <div class="endpoint-right">
+                <span style="color:var(--muted);">Anrop: <strong>{{ stats.calls_micro }} st</strong> | Intäkt: <strong>${{ "%.2f"|format(micro_rev) }} USDC</strong></span>
                 <button class="btn-preview" onclick="previewProduct('/api/v1/crypto-pulse')">👁️ Granska Data</button>
             </div>
         </div>
+
         <div class="endpoint-row">
-            <div>
+            <div class="endpoint-left">
                 <span class="endpoint-code">3. /api/v1/sentiment-signals</span>
                 <span class="price-tag">$0.020 USDC</span>
-                <span class="badge-scout" style="background:#0891b2;margin-left:6px;">MEDIAN-PRIS (SIGNALER)</span>
+                <span class="badge-scout" style="background:#0891b2;">ORDERFLOW & SIGNALER</span>
             </div>
-            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-                <span>🟢 Multi-Source Orderflow</span>
+            <div class="endpoint-right">
+                <span style="color:var(--muted);">🟢 Multi-Source Orderflow</span>
                 <button class="btn-preview" onclick="previewProduct('/api/v1/sentiment-signals')">👁️ Granska Data</button>
             </div>
         </div>
+
         <div class="endpoint-row">
-            <div>
+            <div class="endpoint-left">
                 <span class="endpoint-code">4. /api/v1/base-dex-radar</span>
                 <span class="price-tag">$0.020 USDC</span>
-                <span class="badge-scout" style="background:#7c3aed;margin-left:6px;">BASE DEX WHALE RADAR</span>
+                <span class="badge-scout" style="background:#7c3aed;">WHALE LIQUIDITY RADAR</span>
             </div>
-            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-                <span>Status: 🟢 Live (DexScreener Base)</span>
+            <div class="endpoint-right">
+                <span style="color:var(--muted);">🟢 Live (DexScreener Base)</span>
                 <button class="btn-preview" onclick="previewProduct('/api/v1/base-dex-radar')">👁️ Granska Data</button>
             </div>
         </div>
+
         <div class="endpoint-row">
-            <div>
+            <div class="endpoint-left">
                 <span class="endpoint-code">5. /api/v1/multi-source-dossier</span>
                 <span class="price-tag">$0.150 USDC</span>
-                <span class="badge-scout" style="background:#d97706;margin-left:6px;">PREMIUM AI-DOSSIER</span>
+                <span class="badge-scout" style="background:#d97706;">PREMIUM AI-DOSSIER</span>
             </div>
-            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-                <span>🟢 Flerstegs-analys (Sparar AI-tokens)</span>
+            <div class="endpoint-right">
+                <span style="color:var(--muted);">🟢 Flerstegs-analys (Sparar AI-tokens)</span>
                 <button class="btn-preview" onclick="previewProduct('/api/v1/multi-source-dossier')">👁️ Granska Data</button>
             </div>
         </div>
+
         <div class="endpoint-row">
-            <div>
+            <div class="endpoint-left">
                 <span class="endpoint-code">6. /api/v1/deep-market-report</span>
                 <span class="price-tag">$0.150 USDC</span>
             </div>
-            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-                <span>Anrop: <strong>{{ stats.calls_premium }} st</strong> | Intäkt: <strong>${{ "%.2f"|format(prem_rev) }} USDC</strong> | 🟢</span>
+            <div class="endpoint-right">
+                <span style="color:var(--muted);">Anrop: <strong>{{ stats.calls_premium }} st</strong> | Intäkt: <strong>${{ "%.2f"|format(prem_rev) }} USDC</strong></span>
                 <button class="btn-preview" onclick="previewProduct('/api/v1/deep-market-report')">👁️ Granska Data</button>
             </div>
         </div>
+
         {% for ep in stats.dynamic_endpoints %}
         <div class="endpoint-row">
-            <div>
+            <div class="endpoint-left">
                 <span class="endpoint-code">{{ loop.index + 6 }}. {{ ep.endpoint_path }}</span>
                 <span class="price-tag">${{ "%.3f"|format(ep.price_usdc) }} USDC</span>
-                <span class="badge-scout" style="background:#059669;margin-left:6px;">AUTO-BYGGD ({{ ep.asset_symbol }})</span>
+                <span class="badge-scout" style="background:#059669;">AUTO-BYGGD ({{ ep.asset_symbol }})</span>
             </div>
-            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
-                <span>Anrop: <strong>{{ ep.calls_count }} st</strong> | Intäkt: <strong>${{ "%.2f"|format(ep.revenue_usdc) }} USDC</strong> | 🟢</span>
+            <div class="endpoint-right">
+                <span style="color:var(--muted);">Anrop: <strong>{{ ep.calls_count }} st</strong> | Intäkt: <strong>${{ "%.2f"|format(ep.revenue_usdc) }} USDC</strong></span>
                 <button class="btn-preview" data-ep="{{ ep.endpoint_path }}" onclick="previewProduct(this.getAttribute('data-ep'))">👁️ Granska Data</button>
             </div>
         </div>
         {% endfor %}
+
         <pre id="productInspectorBox" class="inspector-pre"></pre>
     </div>
 
-    <div class="card">
-        <h2>🔍 SPANAR-LOGG (Förslag från din Autonoma Spanar-agent)</h2>
+    <!-- Spanar-Logg (Autonoma förslag) -->
+    <div class="glass-panel">
+        <h2 style="font-size:0.92rem; text-transform:uppercase; letter-spacing:0.8px; color:var(--muted); margin-bottom:14px; display:flex; align-items:center; gap:8px;">
+            🔍 Spanar-Logg (Förslag från din Autonoma Spanar-Agent)
+        </h2>
         <div id="discoveriesContainer">
             {% for d in stats.discoveries %}
             <div class="log-item">
                 <div class="log-header">
-                    <span class="badge-scout">{{ d.status }}</span>
+                    <span class="badge-scout" style="background:#3b82f6;">{{ d.status }}</span>
                     <code class="endpoint-code">{{ d.suggested_endpoint }}</code>
                     <span class="price-tag">${{ "%.2f"|format(d.suggested_price_usdc) }} USDC</span>
                 </div>
@@ -486,35 +1131,54 @@
         </div>
     </div>
 
-    <div class="card">
-        <h2>🎛️ KOMMANDOCENTRAL (PIN-SKYDDAD)</h2>
-        <div class="actions-bar">
+    <!-- Kommandocentral (PIN-Skyddad) -->
+    <div class="glass-panel">
+        <h2 style="font-size:0.92rem; text-transform:uppercase; letter-spacing:0.8px; color:var(--muted); margin-bottom:14px; display:flex; align-items:center; gap:8px;">
+            🎛️ Kommandocentral (PIN-Skyddad Styrning)
+        </h2>
+        
+        <div class="actions-grid">
             <button class="btn-stop" onclick="toggleEmergencyStop()">{{ btn_label }}</button>
-            <button class="btn-scout" style="background:#059669;" onclick="simulatePurchase()">💳 Simulera Testköp ($0.01)</button>
-            <button class="btn-refresh" style="background:#b45309;" onclick="resetSimulations()">🧹 Nollställ Testköp</button>
-            <button class="btn-refresh" style="background:#64748b;" onclick="clearTrafficLogs()">🗑️ Rensa Trafik-Logg</button>
-            <button class="btn-scout" onclick="runSelfCheck()">🧪 Kör Själv-Diagnos</button>
-            <button class="btn-scout" onclick="toggleVerifyMode()">🔐 Växla On-Chain/Hybrid</button>
-            <button class="btn-scout" onclick="runScoutNow()">🔍 Kör Spanar-Agent Nu</button>
-            <button class="btn-refresh" onclick="window.location.reload()">🔄 Uppdatera Siffror</button>
-            <button class="btn-refresh" style="background:#475569;" onclick="logoutAdmin()">🚪 Logga ut</button>
+            <button class="btn-action-green" onclick="simulatePurchase()">💳 Simulera Testköp ($0.01)</button>
+            <button class="btn-action-amber" onclick="resetSimulations()">🧹 Nollställ Testköp</button>
+            <button class="btn-action-slate" onclick="clearTrafficLogs()">🗑️ Rensa Trafik-Logg</button>
+            <button class="btn-action-blue" onclick="runSelfCheck()">🧪 Kör Själv-Diagnos</button>
+            <button class="btn-action-blue" onclick="toggleVerifyMode()">🔐 Växla On-Chain/Hybrid</button>
+            <button class="btn-action-blue" onclick="runScoutNow()">🔍 Kör Spanar-Agent Nu</button>
+            <button class="btn-action-slate" onclick="window.location.reload()">🔄 Uppdatera Siffror</button>
+            <button class="btn-action-slate" onclick="logoutAdmin()">🚪 Logga ut</button>
         </div>
-        <div class="links-footer" style="margin-top: 16px;">
-            <span>Maskin-kataloger för AI-botar:</span>
-            <a href="/api/catalog" target="_blank"><strong>/api/catalog (Gratis 200 OK Katalog)</strong></a>
-            <a href="/.well-known/x402.json" target="_blank">/.well-known/x402.json (x402 Card)</a>
-            <a href="/api/v1/free-teaser" target="_blank">/api/v1/free-teaser (Gratis Smakprov)</a>
-            <a href="/llms.txt" target="_blank">/llms.txt</a>
-            <a href="/agents.json" target="_blank">/agents.json</a>
-            <a href="/mcp" target="_blank">/mcp (MCP Server)</a>
-            <a href="/.well-known/agent.json" target="_blank">/.well-known/agent.json</a>
-            <a href="/docs" target="_blank">/docs (OpenAPI)</a>
+
+        <div style="margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border);">
+            <div style="font-size:0.75rem; text-transform:uppercase; letter-spacing:0.6px; color:var(--muted); margin-bottom:8px; font-weight:600;">
+                🌐 Maskin-Kataloger för Externa AI-Botar (Klicka för att inspektera):
+            </div>
+            <div class="links-chips">
+                <a href="/api/catalog" target="_blank" class="chip-link"><strong>/api/catalog</strong> (Gratis 200 OK Meny)</a>
+                <a href="/.well-known/x402.json" target="_blank" class="chip-link">/.well-known/x402.json (x402 Card)</a>
+                <a href="/api/v1/free-teaser" target="_blank" class="chip-link">/api/v1/free-teaser (Smakprov)</a>
+                <a href="/llms.txt" target="_blank" class="chip-link">/llms.txt</a>
+                <a href="/agents.json" target="_blank" class="chip-link">/agents.json</a>
+                <a href="/mcp" target="_blank" class="chip-link">/mcp (Model Context Protocol)</a>
+                <a href="/.well-known/agent.json" target="_blank" class="chip-link">/.well-known/agent.json</a>
+                <a href="/docs" target="_blank" class="chip-link">/docs (OpenAPI Swagger)</a>
+            </div>
         </div>
     </div>
 
+    <!-- Scripts -->
     <script>
+        function copyWalletAddress(addr) {
+            if (!addr) return;
+            navigator.clipboard.writeText(addr).then(() => {
+                alert("Plånboksadress kopierad till urklipp:\n" + addr);
+            }).catch(() => {
+                prompt("Kopiera plånboksadress manuellt:", addr);
+            });
+        }
+
         async function toggleEmergencyStop() {
-            const pin = prompt("Ange din hemliga Admin PIN / Token för att växla Nödstopp:");
+            const pin = prompt("Ange din hemliga Admin PIN för att växla Nödstopp:");
             if (!pin) return;
             const res = await fetch("/api/admin/toggle-pause", {
                 method: "POST",
@@ -530,7 +1194,7 @@
         }
 
         async function toggleVerifyMode() {
-            const pin = prompt("Ange din hemliga Admin PIN / Token för att växla verifieringsläge:");
+            const pin = prompt("Ange din hemliga Admin PIN för att växla verifieringsläge:");
             if (!pin) return;
             const res = await fetch("/api/admin/toggle-mode", {
                 method: "POST",
@@ -546,7 +1210,7 @@
         }
 
         async function runScoutNow() {
-            const pin = prompt("Ange din hemliga Admin PIN / Token för att köra Spanar-Agenten:");
+            const pin = prompt("Ange din hemliga Admin PIN för att köra Spanar-Agenten:");
             if (!pin) return;
             const res = await fetch("/cron/discover", {
                 method: "POST",
@@ -571,6 +1235,7 @@
             box.textContent = "Hämtar live-produkt från " + endpointPath + " ...";
             const data = await adminFetch("/api/admin/preview-product?endpoint=" + encodeURIComponent(endpointPath));
             box.textContent = "// LIVE PRODUKT-INSPEKTÖR FÖR: " + endpointPath + "\n" + JSON.stringify(data, null, 2);
+            box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
 
         async function runSelfCheck() {
@@ -579,6 +1244,7 @@
             box.textContent = "Kör själv-diagnos på alla 4 agenter...";
             const data = await adminFetch("/api/admin/self-check");
             box.textContent = "// SJÄLV-DIAGNOS RESULTAT:\n" + JSON.stringify(data, null, 2);
+            box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
 
         async function logoutAdmin() {
@@ -613,6 +1279,7 @@
         }
 
         async function clearTrafficLogs() {
+            if (!confirm("Är du säker på att du vill rensa besöksloggen?")) return;
             const res = await fetch("/api/admin/clear-traffic", {
                 method: "POST",
                 credentials: "same-origin"
@@ -651,7 +1318,7 @@
             const tbody = document.getElementById("trafficTableBody");
             if (!tbody) return;
             if (!data.records || data.records.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:14px;">Inga anrop matchar sökningen.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:18px;">Inga anrop matchar sökningen.</td></tr>';
             } else {
                 tbody.innerHTML = data.records.map(ev => {
                     const ts = (ev.created_at || "").substring(11, 19);
@@ -662,13 +1329,13 @@
                     else if (ev.category === 'DISCOVERY') badge = '<span class="stream-badge b-disc">🔍 ' + ev.status_code + ' MENY</span>';
 
                     return `<tr>
-                        <td style="font-family:monospace;color:var(--muted);">${ts}</td>
+                        <td style="font-family:'JetBrains Mono',monospace;color:var(--muted);">${ts}</td>
                         <td><span class="country-tag">${ev.country || "GLOBAL"}</span></td>
                         <td><span class="visitor-pill" onclick="openVisitorJourney('${ev.visitor_id}')">🕵️ ${ev.visitor_id || 'okänd'}</span></td>
                         <td>${ev.agent_type || ''}</td>
                         <td><code class="endpoint-code">${ev.method} ${ev.path}</code></td>
                         <td>${badge}</td>
-                        <td style="font-family:monospace;text-align:right;">${Number(ev.latency_ms || 0).toFixed(1)} ms</td>
+                        <td style="font-family:'JetBrains Mono',monospace;text-align:right;">${Number(ev.latency_ms || 0).toFixed(1)} ms</td>
                     </tr>`;
                 }).join("");
             }
@@ -704,6 +1371,7 @@
             box.style.display = "block";
             title.textContent = `🕵️ BESÖKARENS RESA: ${visitorId}`;
             timeline.innerHTML = '<span style="color:var(--muted)">Laddar klickström...</span>';
+            box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
             try {
                 const res = await fetch("/api/admin/visitor-journey?visitor_id=" + encodeURIComponent(visitorId), { credentials: "same-origin" });
@@ -719,7 +1387,7 @@
                     if (s.status_code === 200 && s.category === 'PAID_200') statusColor = "#4ade80";
                     if (s.category === 'PAYMENT_REJECTED') statusColor = "#f87171";
                     if (s.status_code === 402 && s.category !== 'PAYMENT_REJECTED') statusColor = "#facc15";
-                    return `<div style="padding:4px 0; border-bottom:1px dashed rgba(255,255,255,0.08);">
+                    return `<div class="journey-timeline-item">
                         <strong style="color:var(--muted)">#${idx + 1}</strong> [${ts}] 
                         <code style="color:${statusColor}">${s.method} ${s.path}</code> 
                         ➔ <strong>${s.status_code} (${s.category})</strong> 
@@ -735,7 +1403,7 @@
             document.getElementById("visitorJourneyBox").style.display = "none";
         }
 
-        // Auto-refresh Dashboard var 45:e sekund endast när fliken är aktiv (visibilityState === 'visible')
+        // Auto-refresh Dashboard var 45:e sekund endast när fliken är synlig
         let refreshTimer = null;
         function scheduleRefresh() {
             if (refreshTimer) clearInterval(refreshTimer);
@@ -762,4 +1430,3 @@
     </script>
 </body>
 </html>
-
