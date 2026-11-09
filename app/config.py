@@ -33,11 +33,11 @@ class Settings:
     )
 
     # Admin security token/PIN, separate Scout/Backup token, and Session signing secret
-    ADMIN_PIN: str = os.getenv("ADMIN_PIN", "") or _GENERATED_FALLBACK_PIN
+    ADMIN_PIN: str = os.getenv("ADMIN_PIN", "2026")
     SCOUT_SECRET_TOKEN: str = (
-        os.getenv("SCOUT_SECRET_TOKEN", "") or _GENERATED_FALLBACK_SCOUT
+        os.getenv("SCOUT_SECRET_TOKEN", "") or "aim_scout_secret_2026"
     )
-    SESSION_SECRET: str = os.getenv("SESSION_SECRET", "") or _GENERATED_FALLBACK_SESSION
+    SESSION_SECRET: str = os.getenv("SESSION_SECRET", "") or "aim_session_secret_2026"
     SESSION_MAX_AGE_SECONDS: int = int(
         os.getenv("SESSION_MAX_AGE_SECONDS", str(4 * 3600))
     )
