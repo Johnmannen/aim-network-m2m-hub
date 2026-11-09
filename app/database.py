@@ -920,7 +920,7 @@ def get_paginated_traffic_logs(
     search: str = "",
     filter_cat: str = "ALL",
     page: int = 1,
-    page_size: int = 25,
+    page_size: int = 100,
     db_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Retrieve filtered, paginated traffic logs with visitor session tracking."""

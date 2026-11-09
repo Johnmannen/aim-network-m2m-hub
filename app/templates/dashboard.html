@@ -1000,7 +1000,10 @@
         <!-- Pagination Controls -->
         <div class="pagination-row">
             <div>
-                Visar <span id="paginatedInfo">Sida {{ paginated_traffic.page }} av {{ paginated_traffic.total_pages }} (Totalt {{ paginated_traffic.total_items }} anrop sparade)</span>
+                {% set total_it = paginated_traffic.total_items or 0 %}
+                {% set start_it = 0 if total_it == 0 else (paginated_traffic.page - 1) * paginated_traffic.page_size + 1 %}
+                {% set end_it = [paginated_traffic.page * paginated_traffic.page_size, total_it]|min %}
+                Visar <span id="paginatedInfo">Sida {{ paginated_traffic.page }} av {{ paginated_traffic.total_pages }} (Visar anrop {{ start_it }}–{{ end_it }} av {{ total_it }})</span>
             </div>
             <div style="display:flex;gap:8px;">
                 <button class="btn-page" id="btnPrevPage" onclick="changeTrafficPage(-1)" {% if paginated_traffic.page <= 1 %}disabled{% endif %}>◀ Föregående</button>
@@ -1327,7 +1330,7 @@
                 search: trafficCurrentSearch,
                 filter: trafficCurrentFilter,
                 page: trafficCurrentPage,
-                page_size: 25
+                page_size: 100
             });
             try {
                 const res = await fetch("/api/admin/traffic?" + q.toString(), { credentials: "same-origin" });
@@ -1365,7 +1368,10 @@
                 }).join("");
             }
 
-            document.getElementById("paginatedInfo").textContent = `Sida ${data.page} av ${data.total_pages} (Totalt ${data.total_items} anrop sparade)`;
+            const total = data.total_items || 0;
+            const startIdx = total === 0 ? 0 : (data.page - 1) * data.page_size + 1;
+            const endIdx = Math.min(data.page * data.page_size, total);
+            document.getElementById("paginatedInfo").textContent = `Sida ${data.page} av ${data.total_pages} (Visar anrop ${startIdx}–${endIdx} av ${total})`;
             document.getElementById("btnPrevPage").disabled = data.page <= 1;
             document.getElementById("btnNextPage").disabled = data.page >= data.total_pages;
         }

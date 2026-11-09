@@ -482,7 +482,7 @@ async def admin_get_traffic_logs(
     search: str = "",
     filter: str = "ALL",
     page: int = 1,
-    page_size: int = 25,
+    page_size: int = 100,
     x_admin_pin: Optional[str] = Header(default=None, alias="X-Admin-Pin"),
 ) -> dict:
     """Paginated, searchable traffic log feed with visitor filter support."""
@@ -493,7 +493,7 @@ async def admin_get_traffic_logs(
         search=search,
         filter_cat=filter,
         page=max(1, page),
-        page_size=min(100, max(5, page_size)),
+        page_size=min(500, max(5, page_size)),
         db_path=db_override,
     )
 
@@ -617,7 +617,7 @@ def _render_dashboard_html(request: Request) -> HTMLResponse:
         stats=stats,
         telemetry=telemetry,
         stream_events=stream_events,
-        paginated_traffic=get_paginated_traffic_logs(page=1, page_size=25, db_path=db_override),
+        paginated_traffic=get_paginated_traffic_logs(page=1, page_size=100, db_path=db_override),
         scout_built_count=scout_built_render,
         canonical_count=canonical_render,
         total_active_apis=6 + canonical_render + scout_built_render,
