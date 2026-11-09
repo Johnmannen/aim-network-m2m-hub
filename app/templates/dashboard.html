@@ -390,10 +390,28 @@
         /* Table Design */
         .table-responsive {
             overflow-x: auto;
+            overflow-y: auto;
+            max-height: 450px;
             -webkit-overflow-scrolling: touch;
             border: 1px solid var(--border);
             border-radius: var(--radius-sm);
             background: rgba(10, 15, 26, 0.6);
+            scrollbar-width: thin;
+            scrollbar-color: rgba(255, 255, 255, 0.18) rgba(10, 15, 26, 0.8);
+        }
+        .table-responsive::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        .table-responsive::-webkit-scrollbar-track {
+            background: rgba(10, 15, 26, 0.8);
+        }
+        .table-responsive::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.18);
+            border-radius: 999px;
+        }
+        .table-responsive::-webkit-scrollbar-thumb:hover {
+            background: var(--accent);
         }
         .stream-table {
             width: 100%;
@@ -402,6 +420,9 @@
             text-align: left;
         }
         .stream-table th {
+            position: sticky;
+            top: 0;
+            z-index: 2;
             color: var(--muted);
             font-weight: 600;
             padding: 10px 12px;
@@ -409,7 +430,8 @@
             font-size: 0.72rem;
             text-transform: uppercase;
             letter-spacing: 0.6px;
-            background: rgba(255, 255, 255, 0.02);
+            background: #0d1527;
+            box-shadow: 0 1px 0 var(--border);
             white-space: nowrap;
         }
         .stream-table td {
