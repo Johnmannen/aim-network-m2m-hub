@@ -128,6 +128,19 @@ def init_db(db_path: Optional[str] = None) -> None:
             """
         )
 
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS checkout_failures (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                endpoint TEXT NOT NULL,
+                failure_type TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                payer_or_proof TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            );
+            """
+        )
+
         now = datetime.now(timezone.utc).isoformat()
         conn.execute(
             """
@@ -221,10 +234,20 @@ def get_stats(db_path: Optional[str] = None) -> Dict[str, Any]:
             """
         ).fetchall()
 
+        fail_count_row = conn.execute(
+            "SELECT COUNT(*) as cnt FROM checkout_failures;"
+        ).fetchone()
+        recent_failures_rows = conn.execute(
+            "SELECT * FROM checkout_failures ORDER BY id DESC LIMIT 10;"
+        ).fetchall()
+
         discovery_hits = int(funnel_map.get("DISCOVERY", 0)) + int(funnel_map.get("SAMPLE_200", 0))
         quotes_402 = int(funnel_map.get("QUOTE_402", 0))
         paid_200 = int(funnel_map.get("PAID_200", 0))
-        payment_rejected_hits = int(funnel_map.get("PAYMENT_REJECTED", 0))
+        payment_rejected_hits = max(
+            int(funnel_map.get("PAYMENT_REJECTED", 0)),
+            int(fail_count_row["cnt"] if fail_count_row else 0),
+        )
         blocked_hits = int(funnel_map.get("BLOCKED", 0))
         scanner_hits = int(funnel_map.get("SCANNER", 0))
         total_external = int(avg_lat_row["total_req"] or 0)
@@ -247,6 +270,8 @@ def get_stats(db_path: Optional[str] = None) -> Dict[str, Any]:
             "dynamic_endpoints": [dict(row) for row in dynamic_eps],
             "vip_passes": [dict(row) for row in vip_rows],
             "recent_transactions": [dict(row) for row in recent_txs],
+            "checkout_failures_count": int(fail_count_row["cnt"] if fail_count_row else 0),
+            "recent_checkout_failures": [dict(row) for row in recent_failures_rows],
             "traffic_telemetry": {
                 "total_external_requests": total_external,
                 "discovery_hits": discovery_hits,
@@ -262,6 +287,32 @@ def get_stats(db_path: Optional[str] = None) -> Dict[str, Any]:
                 "recent_stream": [dict(r) for r in recent_traffic_rows],
             },
         }
+
+
+def record_checkout_failure(
+    endpoint: str,
+    failure_type: str,
+    reason: str,
+    payer_or_proof: str = "",
+    db_path: Optional[str] = None,
+) -> None:
+    """Record an unfulfilled payment attempt or checkout error for admin diagnostics."""
+    init_db(db_path)
+    with get_connection(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO checkout_failures (endpoint, failure_type, reason, payer_or_proof, created_at)
+            VALUES (?, ?, ?, ?, ?);
+            """,
+            (
+                endpoint,
+                failure_type,
+                reason[:255],
+                payer_or_proof[:120],
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+        conn.commit()
 
 
 def is_tx_used(tx_hash: str, db_path: Optional[str] = None) -> bool:

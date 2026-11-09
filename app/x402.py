@@ -27,6 +27,7 @@ from app.database import (
     get_stats,
     grant_welcome_bonus_pass,
     is_first_time_buyer,
+    record_checkout_failure,
     record_paid_call,
 )
 
@@ -359,6 +360,13 @@ async def require_x402_payment(
             )
         payload = x402_standard.decode_payment_header(std_header)
         if payload is None:
+            record_checkout_failure(
+                request.url.path,
+                "INVALID_HEADER",
+                "Invalid payment header (expected base64-encoded JSON).",
+                payer_or_proof=std_header[:40],
+                db_path=db_path,
+            )
             return _quote(
                 price_usdc,
                 description,
@@ -372,6 +380,13 @@ async def require_x402_payment(
             client=getattr(request.app.state, "http_client", None),
         )
         if not ok:
+            record_checkout_failure(
+                request.url.path,
+                "FACILITATOR_REJECTED",
+                reason,
+                payer_or_proof=payer or "unknown",
+                db_path=db_path,
+            )
             return _quote(
                 price_usdc, description, error_message=f"Payment verification failed: {reason}"
             )
@@ -504,6 +519,13 @@ async def require_x402_payment(
             http_client=shared_client,
         )
         if not is_valid:
+            record_checkout_failure(
+                request.url.path,
+                "ONCHAIN_VERIFY_FAILED",
+                reason,
+                payer_or_proof=payment_proof,
+                db_path=db_path,
+            )
             return _quote(
                 price_usdc,
                 description,
@@ -533,6 +555,13 @@ async def require_x402_payment(
             request.state.welcome_bonus_unlocked = True
             request.state.bonus_tx_hash = payment_proof
     except ValueError:
+        record_checkout_failure(
+            request.url.path,
+            "REPLAY_REJECTED",
+            "Payment proof transaction hash has already been used (Replay rejected).",
+            payer_or_proof=payment_proof,
+            db_path=db_path,
+        )
         return _quote(
             price_usdc,
             description,

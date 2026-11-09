@@ -220,26 +220,52 @@
         <h2>📡 LIVE TRAFIK- & KONVERTERINGS-RADAR (Externa AI-Botar & Besökare)</h2>
         <div class="funnel-grid">
             <div class="funnel-box" style="border-left: 3px solid #38bdf8;">
-                <div class="funnel-label">🔍 1. Katalog & Meny-läsningar</div>
+                <div class="funnel-label">🔍 1. Meny & Katalog</div>
                 <div class="funnel-num" style="color:#38bdf8;">{{ telemetry.discovery_hits }} st</div>
-                <div class="revenue-sub">/llms.txt, /agents.json, /mcp & teaser</div>
+                <div class="revenue-sub">/api/catalog, /llms.txt, /mcp</div>
             </div>
             <div class="funnel-box" style="border-left: 3px solid #facc15;">
                 <div class="funnel-label">🚪 2. Prisförfrågningar (402 Probes)</div>
                 <div class="funnel-num" style="color:#facc15;">{{ telemetry.quotes_402 }} st</div>
-                <div class="revenue-sub">Botar som fått x402-prisförslag</div>
+                <div class="revenue-sub">Botar som efterfrågat pris</div>
             </div>
             <div class="funnel-box" style="border-left: 3px solid #4ade80;">
                 <div class="funnel-label">💰 3. Genomförda Köp (200 OK)</div>
                 <div class="funnel-num" style="color:#4ade80;">{{ telemetry.paid_200 }} st ({{ telemetry.conversion_rate_pct }}%)</div>
-                <div class="revenue-sub">Konverteringsgrad (402 ➔ Köp)</div>
+                <div class="revenue-sub">Verifierade köp med kvitto</div>
+            </div>
+            <div class="funnel-box" style="border-left: 3px solid #f87171;">
+                <div class="funnel-label">⚠️ 4. Nekade Köp (Kassa-fel)</div>
+                <div class="funnel-num" style="color:#f87171;">{{ telemetry.payment_rejected_hits }} st</div>
+                <div class="revenue-sub">Underbetald, fel signatur, replay</div>
             </div>
             <div class="funnel-box" style="border-left: 3px solid #a855f7;">
-                <div class="funnel-label">⚡ 4. Snitt-Svarstid & Skydd</div>
+                <div class="funnel-label">⚡ 5. Snitt-Svarstid & Skydd</div>
                 <div class="funnel-num" style="color:#c084fc;">{{ telemetry.avg_latency_ms }} ms</div>
                 <div class="revenue-sub">Totalt: {{ telemetry.total_external_requests }} anrop • Blockerade: {{ telemetry.blocked_hits }}</div>
             </div>
         </div>
+
+        {% if checkout_failures %}
+        <div style="background:rgba(239, 68, 68, 0.1); border:1px solid rgba(239, 68, 68, 0.3); border-radius:8px; padding:12px; margin-bottom:14px;">
+            <div style="font-weight:700; color:#f87171; font-size:0.85rem; margin-bottom:6px;">
+                🚨 SENASTE NEKADE KÖPFÖRSÖK I KASSAN (FELSÖKNING):
+            </div>
+            <div style="font-size:0.8rem; color:#e5e7eb;">
+                {% for f in checkout_failures %}
+                <div style="padding:4px 0; border-bottom:1px solid rgba(255,255,255,0.05); display:flex; justify-content:space-between; flex-wrap:wrap; gap:8px;">
+                    <div>
+                        <span style="color:#f87171; font-weight:600;">[{{ f.failure_type }}]</span>
+                        <code style="color:#38bdf8;">{{ f.endpoint }}</code>: {{ f.reason }}
+                    </div>
+                    <div style="color:var(--muted); font-family:monospace; font-size:0.75rem;">
+                        {{ f.created_at[11:19] }} | {{ f.payer_or_proof[:25] }}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
 
         <div style="margin-bottom: 10px;">
             <div class="funnel-label" style="margin-bottom:6px;">🤖 Identifierade Besökare & Bot-Typer (User-Agent Detektor):</div>
@@ -311,11 +337,22 @@
     </div>
 
     <div class="card">
-        <h2>📊 AKTIVA TJÄNSTER (Klicka på "👁️ Granska Data" för att se exakt vad som byggts & säljs)</h2>
+        <h2>📊 AKTIVA TJÄNSTER (Klicka på "👁️ Granska Data" för att se exakt vad som säljs live till botarna)</h2>
         <div class="endpoint-row">
             <div>
-                <span class="endpoint-code">1. /api/v1/crypto-pulse</span>
-                <span class="price-tag">${{ "%.2f"|format(price_micro) }} USDC</span>
+                <span class="endpoint-code">1. /api/v1/arb-scanner</span>
+                <span class="price-tag">$0.005 USDC</span>
+                <span class="badge-scout" style="background:#2563eb;margin-left:6px;">VOLYM-TJÄNST (SPREAD & ARB)</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                <span>🟢 Live Base L2</span>
+                <button class="btn-preview" onclick="previewProduct('/api/v1/arb-scanner')">👁️ Granska Data</button>
+            </div>
+        </div>
+        <div class="endpoint-row">
+            <div>
+                <span class="endpoint-code">2. /api/v1/crypto-pulse</span>
+                <span class="price-tag">$0.005 USDC</span>
             </div>
             <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
                 <span>Anrop: <strong>{{ stats.calls_micro }} st</strong> | Intäkt: <strong>${{ "%.2f"|format(micro_rev) }} USDC</strong> | 🟢</span>
@@ -324,8 +361,19 @@
         </div>
         <div class="endpoint-row">
             <div>
-                <span class="endpoint-code">2. /api/v1/base-dex-radar</span>
-                <span class="price-tag">${{ "%.2f"|format(price_dex) }} USDC</span>
+                <span class="endpoint-code">3. /api/v1/sentiment-signals</span>
+                <span class="price-tag">$0.020 USDC</span>
+                <span class="badge-scout" style="background:#0891b2;margin-left:6px;">MEDIAN-PRIS (SIGNALER)</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                <span>🟢 Multi-Source Orderflow</span>
+                <button class="btn-preview" onclick="previewProduct('/api/v1/sentiment-signals')">👁️ Granska Data</button>
+            </div>
+        </div>
+        <div class="endpoint-row">
+            <div>
+                <span class="endpoint-code">4. /api/v1/base-dex-radar</span>
+                <span class="price-tag">$0.020 USDC</span>
                 <span class="badge-scout" style="background:#7c3aed;margin-left:6px;">BASE DEX WHALE RADAR</span>
             </div>
             <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
@@ -335,8 +383,19 @@
         </div>
         <div class="endpoint-row">
             <div>
-                <span class="endpoint-code">3. /api/v1/deep-market-report</span>
-                <span class="price-tag">${{ "%.2f"|format(price_premium) }} USDC</span>
+                <span class="endpoint-code">5. /api/v1/multi-source-dossier</span>
+                <span class="price-tag">$0.150 USDC</span>
+                <span class="badge-scout" style="background:#d97706;margin-left:6px;">PREMIUM AI-DOSSIER</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                <span>🟢 Flerstegs-analys (Sparar AI-tokens)</span>
+                <button class="btn-preview" onclick="previewProduct('/api/v1/multi-source-dossier')">👁️ Granska Data</button>
+            </div>
+        </div>
+        <div class="endpoint-row">
+            <div>
+                <span class="endpoint-code">6. /api/v1/deep-market-report</span>
+                <span class="price-tag">$0.150 USDC</span>
             </div>
             <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
                 <span>Anrop: <strong>{{ stats.calls_premium }} st</strong> | Intäkt: <strong>${{ "%.2f"|format(prem_rev) }} USDC</strong> | 🟢</span>
@@ -346,8 +405,8 @@
         {% for ep in stats.dynamic_endpoints %}
         <div class="endpoint-row">
             <div>
-                <span class="endpoint-code">{{ loop.index + 3 }}. {{ ep.endpoint_path }}</span>
-                <span class="price-tag">${{ "%.2f"|format(ep.price_usdc) }} USDC</span>
+                <span class="endpoint-code">{{ loop.index + 6 }}. {{ ep.endpoint_path }}</span>
+                <span class="price-tag">${{ "%.3f"|format(ep.price_usdc) }} USDC</span>
                 <span class="badge-scout" style="background:#059669;margin-left:6px;">AUTO-BYGGD ({{ ep.asset_symbol }})</span>
             </div>
             <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
@@ -391,6 +450,8 @@
         </div>
         <div class="links-footer" style="margin-top: 16px;">
             <span>Maskin-kataloger för AI-botar:</span>
+            <a href="/api/catalog" target="_blank"><strong>/api/catalog (Gratis 200 OK Katalog)</strong></a>
+            <a href="/.well-known/x402.json" target="_blank">/.well-known/x402.json (x402 Card)</a>
             <a href="/api/v1/free-teaser" target="_blank">/api/v1/free-teaser (Gratis Smakprov)</a>
             <a href="/llms.txt" target="_blank">/llms.txt</a>
             <a href="/agents.json" target="_blank">/agents.json</a>

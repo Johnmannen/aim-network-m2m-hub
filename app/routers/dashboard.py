@@ -32,10 +32,13 @@ from app.database import (
     set_pause_state,
 )
 from app.services.market_data import (
+    fetch_arb_scanner_data,
     fetch_base_dex_radar,
     fetch_crypto_pulse_data,
     fetch_deep_market_report,
     fetch_dynamic_asset_pulse,
+    fetch_multi_source_dossier,
+    fetch_sentiment_signals,
 )
 
 router = APIRouter(tags=["Overseer Dashboard & Admin"])
@@ -299,15 +302,24 @@ async def preview_product_payload(
     """Inspect the exact live JSON product a buying AI-bot receives (PIN-protected, else it bypasses the paywall)."""
     if not has_valid_session(request):
         verify_admin_pin_with_lockout(request, x_admin_pin)
+    if endpoint in ("/api/v1/arb-scanner", "arb-scanner"):
+        data = await fetch_arb_scanner_data()
+        return {"endpoint": "/api/v1/arb-scanner", "price_usdc": float(settings.PRICE_MICRO_DEC), "product_payload": data}
     if endpoint == "/api/v1/crypto-pulse":
         data = await fetch_crypto_pulse_data()
-        return {"endpoint": endpoint, "price_usdc": settings.PRICE_MICRO_USDC, "product_payload": data}
+        return {"endpoint": endpoint, "price_usdc": float(settings.PRICE_MICRO_DEC), "product_payload": data}
+    if endpoint in ("/api/v1/sentiment-signals", "sentiment-signals"):
+        data = await fetch_sentiment_signals()
+        return {"endpoint": "/api/v1/sentiment-signals", "price_usdc": float(settings.PRICE_DEX_RADAR_DEC), "product_payload": data}
     if endpoint == "/api/v1/base-dex-radar":
         data = await fetch_base_dex_radar()
-        return {"endpoint": endpoint, "price_usdc": settings.PRICE_DEX_RADAR_USDC, "product_payload": data}
+        return {"endpoint": endpoint, "price_usdc": float(settings.PRICE_DEX_RADAR_DEC), "product_payload": data}
+    if endpoint in ("/api/v1/multi-source-dossier", "multi-source-dossier"):
+        data = await fetch_multi_source_dossier()
+        return {"endpoint": "/api/v1/multi-source-dossier", "price_usdc": float(settings.PRICE_PREMIUM_DEC), "product_payload": data}
     if endpoint == "/api/v1/deep-market-report":
         data = await fetch_deep_market_report()
-        return {"endpoint": endpoint, "price_usdc": settings.PRICE_PREMIUM_USDC, "product_payload": data}
+        return {"endpoint": endpoint, "price_usdc": float(settings.PRICE_PREMIUM_DEC), "product_payload": data}
 
     if endpoint.startswith("/api/v1/trending/"):
         slug = endpoint.replace("/api/v1/trending/", "").strip().lower()
@@ -545,15 +557,20 @@ def _render_dashboard_html(request: Request) -> HTMLResponse:
         total_sek=total_sek,
         micro_rev=micro_rev,
         prem_rev=prem_rev,
-        price_micro=settings.PRICE_MICRO_USDC,
-        price_dex=settings.PRICE_DEX_RADAR_USDC,
-        price_premium=settings.PRICE_PREMIUM_USDC,
+        price_micro=float(settings.PRICE_MICRO_DEC),
+        price_dex=float(settings.PRICE_DEX_RADAR_DEC),
+        price_premium=float(settings.PRICE_PREMIUM_DEC),
+        price_arb=float(settings.PRICE_MICRO_DEC),
+        price_sentiment=float(settings.PRICE_DEX_RADAR_DEC),
+        price_dossier=float(settings.PRICE_PREMIUM_DEC),
+        checkout_failures=stats.get("recent_checkout_failures", []),
+        checkout_failures_count=stats.get("checkout_failures_count", 0),
         stats=stats,
         telemetry=telemetry,
         stream_events=stream_events,
         scout_built_count=scout_built_render,
         canonical_count=canonical_render,
-        total_active_apis=3 + canonical_render + scout_built_render,
+        total_active_apis=6 + canonical_render + scout_built_render,
     )
     return HTMLResponse(content=html_content)
 
