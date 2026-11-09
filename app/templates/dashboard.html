@@ -190,6 +190,16 @@
         .country-tag { background: rgba(255,255,255,0.07); padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 0.74rem; }
         .links-footer { display: flex; gap: 16px; flex-wrap: wrap; font-size: 0.85rem; color: var(--muted); margin-top: 8px; }
         .links-footer a { color: var(--accent); text-decoration: none; }
+        .search-row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; align-items: center; }
+        .search-input { flex: 1; min-width: 220px; background: #06090f; border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; color: #fff; font-size: 0.85rem; }
+        .filter-btn { background: rgba(255,255,255,0.05); border: 1px solid var(--border); color: var(--muted); padding: 6px 12px; border-radius: 6px; font-size: 0.76rem; cursor: pointer; font-weight: 600; }
+        .filter-btn.active { background: rgba(56, 189, 248, 0.2); border-color: var(--accent); color: var(--accent); }
+        .pagination-row { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 0.8rem; color: var(--muted); }
+        .btn-page { background: #1e293b; color: #e2e8f0; border: 1px solid var(--border); border-radius: 6px; padding: 6px 14px; font-size: 0.78rem; cursor: pointer; }
+        .btn-page:disabled { opacity: 0.4; cursor: not-allowed; }
+        .visitor-pill { cursor: pointer; text-decoration: underline dotted; color: #38bdf8; font-family: monospace; font-size: 0.75rem; }
+        .visitor-pill:hover { color: #7dd3fc; }
+        .journey-panel { background: #06090f; border: 1px solid #38bdf8; border-radius: 8px; padding: 14px; margin-top: 12px; display: none; }
     </style>
 </head>
 <body>
@@ -278,39 +288,80 @@
             {% endif %}
         </div>
 
+        <div class="search-row">
+            <input type="text" id="trafficSearchInput" class="search-input" placeholder="🔍 Sök i besöksloggen (endpoint, agent, land, visitor_id...)" onkeydown="if(event.key==='Enter')applyTrafficSearch()">
+            <button class="filter-btn active" id="f-ALL" onclick="setTrafficFilter('ALL')">Alla</button>
+            <button class="filter-btn" id="f-PAID" onclick="setTrafficFilter('PAID')">💰 Köp (200)</button>
+            <button class="filter-btn" id="f-QUOTE" onclick="setTrafficFilter('QUOTE')">🚪 402 Offert</button>
+            <button class="filter-btn" id="f-REJECT" onclick="setTrafficFilter('REJECT')">⚠️ Nekade Köp</button>
+            <button class="filter-btn" id="f-BOTS" onclick="setTrafficFilter('BOTS')">🤖 AI-Botar</button>
+        </div>
+
         <div style="overflow-x:auto;">
             <table class="stream-table">
                 <thead>
                     <tr>
                         <th>Tid (UTC)</th>
                         <th>Land</th>
-                        <th>Identifierad Agent / Besökare</th>
+                        <th>Besökar-ID (Session)</th>
+                        <th>Identifierad Agent / Bot</th>
                         <th>Anropad Endpoint</th>
                         <th>Händelse / Status</th>
                         <th style="text-align:right;">Svarstid</th>
                     </tr>
                 </thead>
-                <tbody>
-                    {% if stream_events %}
-                        {% for ev in stream_events %}
+                <tbody id="trafficTableBody">
+                    {% if paginated_traffic and paginated_traffic.records %}
+                        {% for ev in paginated_traffic.records %}
                         <tr>
-                            <td style="font-family:monospace;color:var(--muted);">{{ ev.ts_short }}</td>
+                            <td style="font-family:monospace;color:var(--muted);">{{ ev.created_at[11:19] }}</td>
                             <td><span class="country-tag">{{ ev.country }}</span></td>
+                            <td><span class="visitor-pill" onclick="openVisitorJourney('{{ ev.visitor_id }}')">🕵️ {{ ev.visitor_id }}</span></td>
                             <td>{{ ev.agent_type }}</td>
                             <td><code class="endpoint-code">{{ ev.method }} {{ ev.path }}</code></td>
-                            <td><span class="stream-badge {{ ev.badge_cls }}">{{ ev.badge_txt }}</span></td>
+                            <td>
+                                {% if ev.category == 'PAID_200' %}
+                                    <span class="stream-badge b-paid">💰 {{ ev.status_code }} BETALD</span>
+                                {% elif ev.category == 'PAYMENT_REJECTED' %}
+                                    <span class="stream-badge b-block">⚠️ {{ ev.status_code }} NEKAD</span>
+                                {% elif ev.status_code == 402 %}
+                                    <span class="stream-badge b-quote">🟡 402 PRISOFFERT</span>
+                                {% elif ev.category == 'DISCOVERY' %}
+                                    <span class="stream-badge b-disc">🔍 {{ ev.status_code }} MENY</span>
+                                {% else %}
+                                    <span class="stream-badge b-disc">⚪ {{ ev.status_code }}</span>
+                                {% endif %}
+                            </td>
                             <td style="font-family:monospace;text-align:right;">{{ "%.1f"|format(ev.latency_ms) }} ms</td>
                         </tr>
                         {% endfor %}
                     {% else %}
                         <tr>
-                            <td colspan="6" style="text-align:center;color:var(--muted);padding:14px;">
-                                Inga externa anrop loggade ännu — klicka på /llms.txt eller /api/v1/free-teaser för att se strömmen live!
+                            <td colspan="7" style="text-align:center;color:var(--muted);padding:14px;">
+                                Inga externa anrop matchar sökningen.
                             </td>
                         </tr>
                     {% endif %}
                 </tbody>
             </table>
+        </div>
+
+        <div class="pagination-row">
+            <div>
+                Visar <span id="paginatedInfo">Sida {{ paginated_traffic.page }} av {{ paginated_traffic.total_pages }} (Totalt {{ paginated_traffic.total_items }} anrop sparade)</span>
+            </div>
+            <div style="display:flex;gap:8px;">
+                <button class="btn-page" id="btnPrevPage" onclick="changeTrafficPage(-1)" {% if paginated_traffic.page <= 1 %}disabled{% endif %}>◀ Föregående</button>
+                <button class="btn-page" id="btnNextPage" onclick="changeTrafficPage(1)" {% if paginated_traffic.page >= paginated_traffic.total_pages %}disabled{% endif %}>Nästa ▶</button>
+            </div>
+        </div>
+
+        <div id="visitorJourneyBox" class="journey-panel">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <strong style="color:#38bdf8;font-size:0.9rem;" id="journeyTitle">🕵️ BESÖKARENS FULLA RESA</strong>
+                <button style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:1.1rem;" onclick="closeVisitorJourney()">✖ Stäng</button>
+            </div>
+            <div id="journeyTimeline" style="font-size:0.8rem;line-height:1.6;font-family:monospace;"></div>
         </div>
     </div>
 
@@ -572,6 +623,116 @@
                 const err = await res.json();
                 alert("Kunde inte rensa trafik-logg: " + (err.detail || "Fel"));
             }
+        }
+
+        let trafficCurrentPage = 1;
+        let trafficCurrentFilter = "ALL";
+        let trafficCurrentSearch = "";
+
+        async function fetchTrafficData(page = 1) {
+            trafficCurrentPage = page;
+            const q = new URLSearchParams({
+                search: trafficCurrentSearch,
+                filter: trafficCurrentFilter,
+                page: trafficCurrentPage,
+                page_size: 25
+            });
+            try {
+                const res = await fetch("/api/admin/traffic?" + q.toString(), { credentials: "same-origin" });
+                if (!res.ok) return;
+                const data = await res.json();
+                renderTrafficTable(data);
+            } catch (e) {
+                console.error("Traffic fetch failed", e);
+            }
+        }
+
+        function renderTrafficTable(data) {
+            const tbody = document.getElementById("trafficTableBody");
+            if (!tbody) return;
+            if (!data.records || data.records.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:14px;">Inga anrop matchar sökningen.</td></tr>';
+            } else {
+                tbody.innerHTML = data.records.map(ev => {
+                    const ts = (ev.created_at || "").substring(11, 19);
+                    let badge = '<span class="stream-badge b-disc">⚪ ' + ev.status_code + '</span>';
+                    if (ev.category === 'PAID_200') badge = '<span class="stream-badge b-paid">💰 ' + ev.status_code + ' BETALD</span>';
+                    else if (ev.category === 'PAYMENT_REJECTED') badge = '<span class="stream-badge b-block">⚠️ ' + ev.status_code + ' NEKAD</span>';
+                    else if (ev.status_code === 402) badge = '<span class="stream-badge b-quote">🟡 402 PRISOFFERT</span>';
+                    else if (ev.category === 'DISCOVERY') badge = '<span class="stream-badge b-disc">🔍 ' + ev.status_code + ' MENY</span>';
+
+                    return `<tr>
+                        <td style="font-family:monospace;color:var(--muted);">${ts}</td>
+                        <td><span class="country-tag">${ev.country || "GLOBAL"}</span></td>
+                        <td><span class="visitor-pill" onclick="openVisitorJourney('${ev.visitor_id}')">🕵️ ${ev.visitor_id || 'okänd'}</span></td>
+                        <td>${ev.agent_type || ''}</td>
+                        <td><code class="endpoint-code">${ev.method} ${ev.path}</code></td>
+                        <td>${badge}</td>
+                        <td style="font-family:monospace;text-align:right;">${Number(ev.latency_ms || 0).toFixed(1)} ms</td>
+                    </tr>`;
+                }).join("");
+            }
+
+            document.getElementById("paginatedInfo").textContent = `Sida ${data.page} av ${data.total_pages} (Totalt ${data.total_items} anrop sparade)`;
+            document.getElementById("btnPrevPage").disabled = data.page <= 1;
+            document.getElementById("btnNextPage").disabled = data.page >= data.total_pages;
+        }
+
+        function applyTrafficSearch() {
+            trafficCurrentSearch = document.getElementById("trafficSearchInput").value.trim();
+            fetchTrafficData(1);
+        }
+
+        function setTrafficFilter(filterName) {
+            trafficCurrentFilter = filterName;
+            ["ALL", "PAID", "QUOTE", "REJECT", "BOTS"].forEach(f => {
+                const btn = document.getElementById("f-" + f);
+                if (btn) btn.classList.toggle("active", f === filterName);
+            });
+            fetchTrafficData(1);
+        }
+
+        function changeTrafficPage(delta) {
+            fetchTrafficData(trafficCurrentPage + delta);
+        }
+
+        async function openVisitorJourney(visitorId) {
+            if (!visitorId) return;
+            const box = document.getElementById("visitorJourneyBox");
+            const timeline = document.getElementById("journeyTimeline");
+            const title = document.getElementById("journeyTitle");
+            box.style.display = "block";
+            title.textContent = `🕵️ BESÖKARENS RESA: ${visitorId}`;
+            timeline.innerHTML = '<span style="color:var(--muted)">Laddar klickström...</span>';
+
+            try {
+                const res = await fetch("/api/admin/visitor-journey?visitor_id=" + encodeURIComponent(visitorId), { credentials: "same-origin" });
+                if (!res.ok) return;
+                const data = await res.json();
+                if (!data.steps || data.steps.length === 0) {
+                    timeline.innerHTML = '<span style="color:var(--muted)">Ingen historik hittades.</span>';
+                    return;
+                }
+                timeline.innerHTML = data.steps.map((s, idx) => {
+                    const ts = (s.created_at || "").substring(11, 19);
+                    let statusColor = "#38bdf8";
+                    if (s.status_code === 200 && s.category === 'PAID_200') statusColor = "#4ade80";
+                    if (s.category === 'PAYMENT_REJECTED') statusColor = "#f87171";
+                    if (s.status_code === 402 && s.category !== 'PAYMENT_REJECTED') statusColor = "#facc15";
+                    return `<div style="padding:4px 0; border-bottom:1px dashed rgba(255,255,255,0.08);">
+                        <strong style="color:var(--muted)">#${idx + 1}</strong> [${ts}] 
+                        <code style="color:${statusColor}">${s.method} ${s.path}</code> 
+                        ➔ <strong>${s.status_code} (${s.category})</strong> 
+                        <span style="color:var(--muted)">${s.latency_ms}ms</span>
+                    </div>`;
+                }).join("");
+            } catch (e) {
+                timeline.innerHTML = '<span style="color:#f87171">Kunde inte hämta besökarresa.</span>';
+            }
+        }
+
+        function closeVisitorJourney() {
+            document.getElementById("visitorJourneyBox").style.display = "none";
         }
 
         // Auto-refresh Dashboard var 45:e sekund endast när fliken är aktiv (visibilityState === 'visible')

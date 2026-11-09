@@ -77,6 +77,12 @@ async def lifespan(app: FastAPI):
     app.state.instance_id = f"inst_{uuid.uuid4().hex[:12]}"
     db_override = getattr(app.state, "db_path", None)
     init_db(db_override)
+    try:
+        from app.services.turso_sync import init_turso_schema, is_turso_enabled
+        if is_turso_enabled():
+            init_turso_schema()
+    except Exception as exc:
+        logger.warning("Turso startup init error: %s", exc)
     _bootstrap_canonical_endpoints(db_override)
     app.state.http_client = httpx.AsyncClient(timeout=5.0)
     scout_task = None
@@ -234,6 +240,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 has_admin_cookie=has_admin_cookie,
                 is_sample=is_sample,
                 payment_attempt=has_payment,
+                client_ip=client_ip,
                 db_path=db_override,
             )
         except Exception as exc:

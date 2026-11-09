@@ -23,7 +23,9 @@ from app.database import (
     clear_pin_failures_db,
     clear_traffic_logs_db,
     export_db_snapshot,
+    get_paginated_traffic_logs,
     get_stats,
+    get_visitor_journey,
     import_db_snapshot,
     log_traffic_event,
     record_paid_call,
@@ -469,6 +471,42 @@ async def clear_admin_traffic_logs(
     return {"status": "traffic_cleared", "stats": updated_stats}
 
 
+@router.get("/api/admin/traffic", response_class=JSONResponse)
+async def admin_get_traffic_logs(
+    request: Request,
+    search: str = "",
+    filter: str = "ALL",
+    page: int = 1,
+    page_size: int = 25,
+    x_admin_pin: Optional[str] = Header(default=None, alias="X-Admin-Pin"),
+) -> dict:
+    """Paginated, searchable traffic log feed with visitor filter support."""
+    if not has_valid_session(request):
+        verify_admin_pin_with_lockout(request, x_admin_pin)
+    db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
+    return get_paginated_traffic_logs(
+        search=search,
+        filter_cat=filter,
+        page=max(1, page),
+        page_size=min(100, max(5, page_size)),
+        db_path=db_override,
+    )
+
+
+@router.get("/api/admin/visitor-journey", response_class=JSONResponse)
+async def admin_get_visitor_journey(
+    request: Request,
+    visitor_id: str,
+    x_admin_pin: Optional[str] = Header(default=None, alias="X-Admin-Pin"),
+) -> dict:
+    """Return chronological clickstream/journey for an individual bot or visitor session."""
+    if not has_valid_session(request):
+        verify_admin_pin_with_lockout(request, x_admin_pin)
+    db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
+    steps = get_visitor_journey(visitor_id, db_path=db_override)
+    return {"visitor_id": visitor_id, "steps": steps, "count": len(steps)}
+
+
 def _render_dashboard_html(request: Request) -> HTMLResponse:
     db_override = request.app.state.db_path if hasattr(request.app.state, "db_path") else None
     stats = get_stats(db_override)
@@ -568,6 +606,7 @@ def _render_dashboard_html(request: Request) -> HTMLResponse:
         stats=stats,
         telemetry=telemetry,
         stream_events=stream_events,
+        paginated_traffic=get_paginated_traffic_logs(page=1, page_size=25, db_path=db_override),
         scout_built_count=scout_built_render,
         canonical_count=canonical_render,
         total_active_apis=6 + canonical_render + scout_built_render,

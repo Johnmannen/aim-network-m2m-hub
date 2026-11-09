@@ -105,6 +105,7 @@ def init_db(db_path: Optional[str] = None) -> None:
             """
             CREATE TABLE IF NOT EXISTS traffic_logs (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                visitor_id TEXT NOT NULL DEFAULT '',
                 path TEXT NOT NULL,
                 method TEXT NOT NULL,
                 status_code INTEGER NOT NULL,
@@ -117,6 +118,10 @@ def init_db(db_path: Optional[str] = None) -> None:
             );
             """
         )
+        try:
+            conn.execute("ALTER TABLE traffic_logs ADD COLUMN visitor_id TEXT NOT NULL DEFAULT '';")
+        except Exception:
+            pass
 
         conn.execute(
             """
@@ -752,9 +757,10 @@ def log_traffic_event(
     has_admin_cookie: bool = False,
     is_sample: bool = False,
     payment_attempt: bool = False,
+    client_ip: str = "",
     db_path: Optional[str] = None,
 ) -> None:
-    """Record an HTTP request into traffic_logs with automatic funnel categorization."""
+    """Record an HTTP request into traffic_logs with automatic funnel categorization and visitor tracking."""
     init_db(db_path)
 
     ua_lower = (user_agent or "").lower()
@@ -808,6 +814,10 @@ def log_traffic_event(
         "/sitemap.xml",
         "/robots.txt",
         "/api/v1/free-teaser",
+        "/api/catalog",
+        "/catalog",
+        "/.well-known/x402.json",
+        "/.well-known/x402",
     ):
         category = "DISCOVERY"
     else:
@@ -821,6 +831,28 @@ def log_traffic_event(
         agent_label = "🧪 Simulerad Test-Bot (Admin)"
     else:
         agent_label = classify_user_agent(user_agent)
+
+    import hashlib
+    raw_fp = f"{client_ip}_{user_agent}".strip()
+    fp_hash = hashlib.sha256(raw_fp.encode("utf-8", errors="ignore")).hexdigest()[:6]
+    if "claude" in ua_lower:
+        prefix = "claude"
+    elif "gpt" in ua_lower or "openai" in ua_lower:
+        prefix = "openai"
+    elif "perplexity" in ua_lower:
+        prefix = "perplexity"
+    elif "gemini" in ua_lower or "google" in ua_lower:
+        prefix = "gemini"
+    elif "python" in ua_lower or "httpx" in ua_lower:
+        prefix = "python"
+    elif "curl" in ua_lower:
+        prefix = "curl"
+    elif is_scanner:
+        prefix = "scan"
+    else:
+        prefix = "bot"
+    visitor_id = f"{prefix}_{fp_hash}"
+
     now_dt = datetime.now(timezone.utc)
     now_iso = now_dt.isoformat()
     retention_days = int(getattr(settings, "TRAFFIC_RETENTION_DAYS", 30))
@@ -830,10 +862,11 @@ def log_traffic_event(
         conn.execute(
             """
             INSERT INTO traffic_logs
-            (path, method, status_code, category, agent_type, country, latency_ms, is_internal, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+            (visitor_id, path, method, status_code, category, agent_type, country, latency_ms, is_internal, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             (
+                visitor_id,
                 path,
                 method.upper(),
                 int(status_code),
@@ -855,6 +888,108 @@ def log_traffic_event(
             (cutoff_iso,),
         )
         conn.commit()
+
+    # Sync to Turso Cloud SQLite if enabled
+    try:
+        from app.services.turso_sync import execute_turso_sync, is_turso_enabled
+        if is_turso_enabled() and not is_internal:
+            execute_turso_sync(
+                """
+                INSERT INTO traffic_logs
+                (visitor_id, path, method, status_code, category, agent_type, country, latency_ms, is_internal, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                """,
+                [
+                    visitor_id,
+                    path,
+                    method.upper(),
+                    int(status_code),
+                    category,
+                    agent_label,
+                    (country or "GLOBAL").upper()[:8],
+                    round(float(latency_ms), 2),
+                    is_internal,
+                    now_iso,
+                ],
+            )
+    except Exception as exc:
+        logger.warning("Turso traffic sync skipped: %s", exc)
+
+
+def get_paginated_traffic_logs(
+    search: str = "",
+    filter_cat: str = "ALL",
+    page: int = 1,
+    page_size: int = 25,
+    db_path: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Retrieve filtered, paginated traffic logs with visitor session tracking."""
+    init_db(db_path)
+    clean_search = (search or "").strip().lower()
+    clean_filter = (filter_cat or "ALL").upper()
+    offset = max(0, (page - 1) * page_size)
+
+    where_clauses = ["is_internal = 0"]
+    params: list[Any] = []
+
+    if clean_search:
+        where_clauses.append(
+            "(LOWER(path) LIKE ? OR LOWER(agent_type) LIKE ? OR LOWER(country) LIKE ? OR LOWER(visitor_id) LIKE ?)"
+        )
+        s_param = f"%{clean_search}%"
+        params.extend([s_param, s_param, s_param, s_param])
+
+    if clean_filter == "PAID":
+        where_clauses.append("category = 'PAID_200'")
+    elif clean_filter == "QUOTE":
+        where_clauses.append("status_code = 402 AND category != 'PAYMENT_REJECTED'")
+    elif clean_filter == "REJECT":
+        where_clauses.append("category = 'PAYMENT_REJECTED'")
+    elif clean_filter == "BOTS":
+        where_clauses.append("agent_type NOT LIKE '%Browser%'")
+
+    where_sql = " AND ".join(where_clauses)
+
+    with get_connection(db_path) as conn:
+        count_query = f"SELECT COUNT(*) as total FROM traffic_logs WHERE {where_sql};"
+        total_items = conn.execute(count_query, params).fetchone()["total"]
+
+        query = f"""
+            SELECT * FROM traffic_logs
+            WHERE {where_sql}
+            ORDER BY id DESC
+            LIMIT ? OFFSET ?;
+        """
+        rows = conn.execute(query, params + [page_size, offset]).fetchall()
+        total_pages = max(1, (total_items + page_size - 1) // page_size)
+
+        return {
+            "records": [dict(r) for r in rows],
+            "total_items": total_items,
+            "page": page,
+            "page_size": page_size,
+            "total_pages": total_pages,
+            "search": search,
+            "filter": clean_filter,
+        }
+
+
+def get_visitor_journey(visitor_id: str, db_path: Optional[str] = None) -> list[dict[str, Any]]:
+    """Retrieve full chronological clickstream/journey for an individual bot or visitor."""
+    init_db(db_path)
+    clean_id = (visitor_id or "").strip()
+    if not clean_id:
+        return []
+    with get_connection(db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM traffic_logs
+            WHERE visitor_id = ?
+            ORDER BY id ASC;
+            """,
+            (clean_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
 
 def export_db_snapshot(db_path: Optional[str] = None) -> Dict[str, Any]:

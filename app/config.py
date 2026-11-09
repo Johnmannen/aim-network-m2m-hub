@@ -117,6 +117,9 @@ class Settings:
     DATABASE_PATH: str = os.getenv(
         "DATABASE_PATH", str(BASE_DIR / "data" / "aim_network.db")
     )
+    # Turso Cloud SQLite (Durable persistent database for zero data loss on Render)
+    TURSO_DATABASE_URL: str = os.getenv("TURSO_DATABASE_URL", "").strip()
+    TURSO_AUTH_TOKEN: str = os.getenv("TURSO_AUTH_TOKEN", "").strip()
     BACKUP_GIST_ID: str = os.getenv("BACKUP_GIST_ID", "")
     GITHUB_BACKUP_TOKEN: str = os.getenv("GITHUB_BACKUP_TOKEN", "")
 
