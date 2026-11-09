@@ -384,6 +384,11 @@ async def run_agent_self_diagnosis(
                 "status": "ONLINE",
                 "detail": f"Exponerar {total_services} st säljbara API:er i /llms.txt, /agents.json, /mcp & /sitemap.xml.",
             },
+            {
+                "name": "5. Molnlagring & Persistens (Turso Cloud SQLite)",
+                "status": "ONLINE (Cloud Dual-Write)" if bool(settings.TURSO_DATABASE_URL and settings.TURSO_AUTH_TOKEN) else "LOCAL_STORAGE (Lokal fallback)",
+                "detail": "Data sparas i Turso Cloud över alla Render-deploys" if bool(settings.TURSO_DATABASE_URL and settings.TURSO_AUTH_TOKEN) else "Data sparas lokalt i /data/aim_network.db",
+            },
         ],
     }
 
@@ -582,6 +587,10 @@ def _render_dashboard_html(request: Request) -> HTMLResponse:
     canonical_slugs = {"morpho", "virtual"}
     canonical_render = sum(1 for ep in all_dyn_render if ep.get("slug") in canonical_slugs)
     scout_built_render = sum(1 for ep in all_dyn_render if ep.get("slug") not in canonical_slugs)
+    turso_configured = bool(settings.TURSO_DATABASE_URL and settings.TURSO_AUTH_TOKEN)
+    turso_badge = "☁️ TURSO CLOUD: AKTIV" if turso_configured else "💾 LOKAL SQLITE"
+    turso_color = "#4ade80" if turso_configured else "#94a3b8"
+
     template = _jinja_env.get_template("dashboard.html")
     html_content = template.render(
         status_badge_color=status_badge_color,
@@ -591,6 +600,8 @@ def _render_dashboard_html(request: Request) -> HTMLResponse:
         wallet=wallet,
         short_wallet=short_wallet,
         v_mode_label=v_mode_label,
+        turso_badge=turso_badge,
+        turso_color=turso_color,
         total_rev=total_rev,
         total_sek=total_sek,
         micro_rev=micro_rev,

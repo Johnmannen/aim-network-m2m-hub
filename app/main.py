@@ -305,10 +305,13 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
     @app.api_route("/health", methods=["GET", "HEAD"], tags=["System"])
     async def health_check():
+        from app.services.turso_sync import is_turso_enabled
+        turso_configured = is_turso_enabled()
         return {
             "status": "healthy",
             "wallet": settings.WALLET_ADDRESS,
             "network": "base-mainnet",
+            "turso_persistence": "connected" if turso_configured else "local_fallback",
         }
 
     return app
